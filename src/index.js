@@ -124,7 +124,7 @@ async function sendNotificationToUser(userId, timeLabel, isEarlyWarning = true) 
     const channel = await client.channels.fetch(process.env.NOTIFICATION_CHANNEL_ID);
     if (channel) {
       // Always send message to channel with user mention
-      const message = `<@${userId}>\n⏰ **5-minute reminder**: The MVP will born in a few minutes at ${timeLabel}!`;
+      const message = `<@${userId}>\n⏰ **แจ้งเตือนล่วงหน้า 5 นาที**: MVP กำลังจะเกิดในเวลา ${timeLabel}! อย่าลืมเตรียมตัวให้พร้อมนะ!`;
       
       await channel.send(message);
     }
@@ -201,7 +201,7 @@ async function sendDailySelector(channel, userId = null) {
       }
     }
     
-    let embedDescription = 'Select the times you want to be notified.\n\n';
+    let embedDescription = 'กรุณาเลือกเวลาที่คุณต้องการรับการแจ้งเตือนสำหรับ MVP\n\n';
     
     if (selectedTimes.length > 0) {
       const timeLabels = selectedTimes.map(timeValue => {
@@ -209,20 +209,20 @@ async function sendDailySelector(channel, userId = null) {
         return time ? `• ${time.label}` : `• ${timeValue}`;
       }).join('\n');
       
-      embedDescription += `**Your Current Notifications:**\n${timeLabels}\n\n`;
+      embedDescription += `**เวลาการแจ้งเตือนที่คุณเลือกไว้:**\n${timeLabels}\n\n`;
       
       // Show auto-apply preference if available
       if (userId && userPrefs[userId]) {
-        embedDescription += `**Settings:**\n`;
-        embedDescription += `• ${userPrefs[userId].autoApply ? '✅ Saved as default times' : '⏱️ One-time only'}\n`;
-        embedDescription += `• ${userPrefs[userId].paused ? '⏸️ Notifications paused' : '▶️ Notifications active'}\n\n`;
+        embedDescription += `**การตั้งค่าของคุณ:**\n`;
+        embedDescription += `• ${userPrefs[userId].autoApply ? '✅ ใช้เวลานี้เป็นค่าตั้งต้น' : '⏱️ แจ้งเตือนเฉพาะครั้งนี้'}\n`;
+        embedDescription += `• ${userPrefs[userId].paused ? '⏸️ การแจ้งเตือนถูกพักไว้' : '▶️ กำลังแจ้งเตือนตามปกติ'}\n\n`;
       }
     }
     
-    embedDescription += 'You can choose to save these as your default times or use them just for today.\n\nYour selections will be private and notifications will be sent only to you.';
+    embedDescription += 'คุณสามารถเลือกบันทึกเวลาเหล่านี้เป็นค่าตั้งต้น หรือใช้สำหรับวันนี้เท่านั้น\n\nการตั้งค่าของคุณจะเป็นแบบส่วนตัว และการแจ้งเตือนจะถูกส่งเฉพาะถึงคุณ';
     
     const embed = new EmbedBuilder()
-      .setTitle('🔔 ROMC MVP Notification Times')
+      .setTitle('🔔 ตั้งเวลาแจ้งเตือน MVP - ROMC')
       .setDescription(embedDescription)
       .setColor('#5865F2');
 
@@ -315,7 +315,7 @@ async function testNotification(userId, timeValue, channel) {
       const formattedMinutes = minutes < 10 ? `0${minutes}` : minutes;
       const currentTime = `${formattedHours}:${formattedMinutes}`;
       
-      await channel.send(`❌ Invalid time value: ${timeValue}. Please provide a valid notification time.`);
+      await channel.send(`❌ ไม่พบเวลาที่ระบุ: ${timeValue} กรุณาเลือกเวลาที่ถูกต้องจากรายการ`);
       return false;
     }
 
@@ -325,7 +325,7 @@ async function testNotification(userId, timeValue, channel) {
     return true;
   } catch (err) {
     console.error('Error testing notification:', err);
-    await channel.send(`❌ An error occurred while testing notifications: ${err.message}`);
+    await channel.send(`❌ พบข้อผิดพลาดระหว่างทดสอบแจ้งเตือน: ${err.message}`);
     return false;
   }
 }
@@ -358,7 +358,7 @@ function scheduleDailyMessage() {
       try {
         const channel = await client.channels.fetch(process.env.NOTIFICATION_CHANNEL_ID);
         if (channel) {
-          await channel.send('🧪 **TEST MODE**: Daily selector is scheduled for 8:00 AM. Use `!romc-mvp test` to test notifications immediately.');
+          await channel.send('🧪 **โหมดทดสอบ**: ระบบจะกำหนดแจ้งเตือนรายวันเวลา 8:00 น. คุณสามารถใช้ `!romc-mvp test` เพื่อทดสอบแจ้งเตือนทันที');
         }
       } catch (err) {
         console.error('Error sending test mode notification:', err);
@@ -582,17 +582,16 @@ client.on('messageCreate', async message => {
           .setTitle('🔔 ROMC MVP Notification Bot - Help')
           .setDescription('Available commands:')
           .addFields(
-            { name: '`!romc-mvp`', value: 'Show this help message', inline: false },
-            { name: '`!romc-mvp setup`', value: 'Open notification time selection menu', inline: false },
-            { name: '`!romc-mvp me`', value: 'Show your current notification times', inline: false },
-            { name: '`!romc-mvp schedule`', value: 'Preview upcoming MVP times', inline: false },
-            { name: '`!romc-mvp stop`', value: 'Clear times and stop all notifications', inline: false },
-            { name: '`!romc-mvp pause`', value: 'Temporarily disable notifications', inline: false },
-            { name: '`!romc-mvp resume`', value: 'Re-enable paused notifications', inline: false },
-            { name: '`!romc-mvp @user`', value: 'Show notification times for mentioned user', inline: false },
-            ...(isTestMode ? [{ name: '`!romc-mvp test [time]`', value: 'Test notifications (TEST MODE only)', inline: false }] : [])
+            { name: '`!romc-mvp`', value: 'แสดงคำแนะนำการใช้งาน', inline: false },
+            { name: '`!romc-mvp setup`', value: 'ตั้งค่าเวลาแจ้งเตือน', inline: false },
+            { name: '`!romc-mvp me`', value: 'ดูเวลาการแจ้งเตือนของคุณ', inline: false },
+            { name: '`!romc-mvp schedule`', value: 'ดูเวลาการเกิด MVP ถัดไป', inline: false },
+            { name: '`!romc-mvp stop`', value: 'ยกเลิกการแจ้งเตือนทั้งหมด', inline: false },
+            { name: '`!romc-mvp pause`', value: 'หยุดการแจ้งเตือนชั่วคราว', inline: false },
+            { name: '`!romc-mvp resume`', value: 'เริ่มการแจ้งเตือนอีกครั้ง', inline: false },
+            { name: '`!romc-mvp @user`', value: 'ดูเวลาการแจ้งเตือนของผู้ใช้ที่ถูกกล่าวถึง', inline: false },
+            ...(isTestMode ? [{ name: '`!romc-mvp test [เวลา]`', value: 'ทดสอบการแจ้งเตือน (สำหรับโหมดทดสอบเท่านั้น)', inline: false }] : [])
           )
-          .setColor('#5865F2')
           .setFooter({ text: 'ROMC MVP Notification System' });
         
         await message.reply({ embeds: [helpEmbed] });
@@ -612,7 +611,7 @@ client.on('messageCreate', async message => {
       } else if (command === 'test') {
         // Test command only available in test mode
         if (!isTestMode) {
-          await message.reply('❌ Test mode is not enabled. Run the bot with `TEST_MODE=true` or `--test` flag to enable test mode.');
+          await message.reply('❌ โหมดทดสอบยังไม่เปิดใช้งาน กรุณารันบอทด้วย `TEST_MODE=true` หรือใช้ flag `--test` เพื่อเปิดโหมดทดสอบ');
           return;
         }
 
@@ -637,11 +636,11 @@ client.on('messageCreate', async message => {
           );
           
           if (timeInfo) {
-            await message.reply(`🧪 **TEST MODE**: Testing notifications for ${timeInfo.label}...`);
+            await message.reply(`🧪 **โหมดทดสอบ**: กำลังส่งแจ้งเตือนทดสอบสำหรับเวลา ${timeInfo.label}...`);
             await testNotification(userId, timeInfo.value, message.channel);
           } else {
             const availableTimes = NOTIFICATION_TIMES.map(t => `\`${t.value}\` (${t.label})`).join(', ');
-            await message.reply(`❌ Invalid time format. Available times: ${availableTimes}`);
+            await message.reply(`❌ เวลาไม่ถูกต้อง กรุณาเลือกจาก: ${availableTimes}`);
           }
         } 
         // If no time provided but user has preferences, test their first selected time
@@ -649,30 +648,30 @@ client.on('messageCreate', async message => {
           const timeValue = userPrefs[userId].times[0];
           const timeInfo = NOTIFICATION_TIMES.find(t => t.value === timeValue);
           
-          await message.reply(`🧪 **TEST MODE**: Testing notifications for your selected time (${timeInfo ? timeInfo.label : timeValue})...`);
+          await message.reply(`🧪 **โหมดทดสอบ**: กำลังทดสอบแจ้งเตือนสำหรับเวลา (${timeInfo ? timeInfo.label : timeValue})...`);
           await testNotification(userId, timeValue, message.channel);
         }
         // No time provided and user has no preferences
         else {
-          await message.reply(`🧪 **TEST MODE**: You have no notification times set. Testing with default time (12:00 PM)...`);
+          await message.reply(`🧪 **โหมดทดสอบ**: คุณยังไม่มีเวลาที่ตั้งไว้ กำลังทดสอบด้วยเวลาเริ่มต้น 12:00 น.`);
           await testNotification(userId, '12:00', message.channel);
         }
 
       } else if (command === 'testall') {
         // Test all command only available in test mode and for admins
         if (!isTestMode) {
-          await message.reply('❌ Test mode is not enabled. Run the bot with `TEST_MODE=true` or `--test` flag to enable test mode.');
+          await message.reply('❌ โหมดทดสอบยังไม่เปิดใช้งาน โปรดเรียกบอทด้วย `TEST_MODE=true` หรือเพิ่ม flag `--test` เพื่อเปิดใช้งาน');
           return;
         }
 
         // Check if user has admin permissions
         if (!message.member.permissions.has('ADMINISTRATOR')) {
-          await message.reply('❌ You need administrator permissions to test all notification times.');
+          await message.reply('❌ ต้องมีสิทธิ์ผู้ดูแลระบบเท่านั้นถึงจะทดสอบการแจ้งเตือนได้');
           return;
         }
 
         const userId = message.author.id;
-        await message.reply('🧪 **TEST MODE**: Testing all notification times (early warnings disabled)...');
+        await message.reply('🧪 **โหมดทดสอบ**: กำลังทดสอบแจ้งเตือนทั้งหมด...');
         
         // Test each notification time with a delay between them
         for (const timeInfo of NOTIFICATION_TIMES) {
@@ -680,7 +679,7 @@ client.on('messageCreate', async message => {
           await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay between notifications
         }
         
-        await message.reply('✅ All notification tests completed!');
+        await message.reply('✅ ทดสอบแจ้งเตือนทั้งหมดเสร็จเรียบร้อยแล้ว!');
         
       } else if (command === 'me') {
         // Show current user's notification times
@@ -696,7 +695,7 @@ client.on('messageCreate', async message => {
         const userSettings = userPrefs[userId];
         
         if (!userSettings.times || userSettings.times.length === 0) {
-          await message.reply('❌ You have no notification times set. Use `!romc-mvp setup` to configure them.');
+          await message.reply('❌ คุณยังไม่ได้ตั้งเวลาแจ้งเตือน\nโปรดใช้คำสั่ง `!romc-mvp setup` เพื่อกำหนดเวลา');
           return;
         }
         
@@ -706,8 +705,13 @@ client.on('messageCreate', async message => {
         }).join('\n');
         
         const userEmbed = new EmbedBuilder()
-          .setTitle(`🔔 ${message.author.username}'s Notification Times`)
-          .setDescription(`**Your scheduled times:**\n${timesList}\n\n**Auto-apply:** ${userSettings.autoApply ? '✅ Enabled' : '❌ Disabled'}\n**Status:** ${userSettings.paused ? '⏸️ Paused' : '▶️ Active'}\n\n**You'll receive:**\n• ⏰ 5-minute reminders\n• 🔔 Main notifications`)
+          .setTitle(`🔔 เวลาแจ้งเตือนของ ${message.author.username}`)
+          .setDescription(
+            `**เวลาที่กำหนดไว้:**\n${timesList}\n\n` +
+            `**ตั้งเป็นค่าเริ่มต้น:** ${userSettings.autoApply ? '✅ เปิดใช้งาน' : '❌ ปิดใช้งาน'}\n` +
+            `**สถานะ:** ${userSettings.paused ? '⏸️ หยุดชั่วคราว' : '▶️ กำลังทำงาน'}\n\n` +
+            `**คุณจะได้รับ:**\n• ⏰ แจ้งเตือนล่วงหน้า 5 นาที`
+          )
           .setColor('#00FF00')
           .setThumbnail(message.author.displayAvatarURL());
         
@@ -750,12 +754,12 @@ client.on('messageCreate', async message => {
           const hoursUntil = Math.floor(timeUntil / 60);
           const minutesUntil = timeUntil % 60;
           
-          return `• ${time.label} (in ${hoursUntil}h ${minutesUntil}m)`;
+          return `• ${time.label} (อีก ${hoursUntil} ชม. ${minutesUntil} นาที)`;
         }).join('\n');
         
         const scheduleEmbed = new EmbedBuilder()
-          .setTitle('🕒 Upcoming MVP Times')
-          .setDescription(`**Next 5 MVP times:**\n${timesList}`)
+          .setTitle('🕒 เวลาเกิด MVP ที่จะมาถึงเร็วๆ นี้')
+          .setDescription(`**5 เวลาที่ MVP จะเกิดถัดไป:**\n${timesList}`)
           .setColor('#5865F2')
           .setFooter({ text: 'ROMC MVP Notification System' });
         
@@ -790,8 +794,8 @@ client.on('messageCreate', async message => {
         await saveUserPreferences(userPrefs);
         
         const stopEmbed = new EmbedBuilder()
-          .setTitle('🛑 Notifications Stopped')
-          .setDescription('All your notification times have been cleared and notifications have been stopped.')
+          .setTitle('🛑 การแจ้งเตือนถูกหยุดแล้ว')
+          .setDescription('เวลาการแจ้งเตือนทั้งหมดของคุณถูกลบและการแจ้งเตือนถูกปิดเรียบร้อยแล้ว')
           .setColor('#FF0000');
         
         await message.reply({ embeds: [stopEmbed] });
@@ -807,7 +811,7 @@ client.on('messageCreate', async message => {
         }
         
         if (!userPrefs[userId].times || userPrefs[userId].times.length === 0) {
-          await message.reply('❌ You have no notification times set. Use `!romc-mvp setup` to configure them.');
+          await message.reply('❌ คุณยังไม่ได้ตั้งเวลาแจ้งเตือน โปรดใช้คำสั่ง `!romc-mvp setup` เพื่อกำหนดเวลาของคุณ');
           return;
         }
         
@@ -827,8 +831,8 @@ client.on('messageCreate', async message => {
         }
         
         const pauseEmbed = new EmbedBuilder()
-          .setTitle('⏸️ Notifications Paused')
-          .setDescription('Your notifications have been temporarily paused. Use `!romc-mvp resume` to resume them.')
+          .setTitle('⏸️ หยุดการแจ้งเตือนชั่วคราว')
+          .setDescription('⏸️ การแจ้งเตือนถูกหยุดชั่วคราวแล้ว\nใช้คำสั่ง `!romc-mvp resume` เพื่อกลับมาใช้งานอีกครั้ง')
           .setColor('#FFA500');
         
         await message.reply({ embeds: [pauseEmbed] });
@@ -844,12 +848,12 @@ client.on('messageCreate', async message => {
         }
         
         if (!userPrefs[userId].times || userPrefs[userId].times.length === 0) {
-          await message.reply('❌ You have no notification times set. Use `!romc-mvp setup` to configure them.');
+          await message.reply('❌ คุณยังไม่ได้ตั้งเวลาแจ้งเตือน โปรดใช้คำสั่ง `!romc-mvp setup` เพื่อกำหนดเวลาของคุณ');
           return;
         }
         
         if (!userPrefs[userId].paused) {
-          await message.reply('ℹ️ Your notifications are already active.');
+          await message.reply('▶️ เปิดการแจ้งเตือนอีกครั้งเรียบร้อยแล้ว');
           return;
         }
         
@@ -869,8 +873,8 @@ client.on('messageCreate', async message => {
         }
         
         const resumeEmbed = new EmbedBuilder()
-          .setTitle('▶️ Notifications Resumed')
-          .setDescription('Your notifications have been resumed.')
+          .setTitle('▶️ เริ่มการแจ้งเตือนอีกครั้ง')
+          .setDescription('การแจ้งเตือนของคุณกลับมาใช้งานได้แล้ว')
           .setColor('#00FF00');
         
         await message.reply({ embeds: [resumeEmbed] });
@@ -882,7 +886,7 @@ client.on('messageCreate', async message => {
         const userSettings = userPrefs[mentionedUser.id];
         
         if (!userSettings || !userSettings.times || userSettings.times.length === 0) {
-          await message.reply(`❌ ${mentionedUser.username} has no notification times set.`);
+          await message.reply(`❌ ${mentionedUser.username} ไม่มีเวลาแจ้งเตือนที่ตั้งไว้`);
           return;
         }
         
@@ -892,8 +896,8 @@ client.on('messageCreate', async message => {
         }).join('\n');
         
         const mentionedUserEmbed = new EmbedBuilder()
-          .setTitle(`🔔 ${mentionedUser.username}'s Notification Times`)
-          .setDescription(`**Scheduled times:**\n${timesList}\n\n**Auto-apply:** ${userSettings.autoApply ? '✅ Enabled' : '❌ Disabled'}\n**Status:** ${userSettings.paused ? '⏸️ Paused' : '▶️ Active'}`)
+          .setTitle(`🔔 เวลาแจ้งเตือนของ ${mentionedUser.username}`)
+          .setDescription(`**เวลาที่ตั้งไว้:**\n${timesList}\n\n**ตั้งเป็นค่าเริ่มต้น:** ${userSettings.autoApply ? '✅ เปิดใช้งาน' : '❌ ปิดใช้งาน'}\n**สถานะ:** ${userSettings.paused ? '⏸️ หยุดชั่วคราว' : '▶️ กำลังทำงาน'}`)
           .setColor('#FFA500')
           .setThumbnail(mentionedUser.displayAvatarURL());
         
@@ -901,12 +905,12 @@ client.on('messageCreate', async message => {
         
       } else {
         // Unknown command
-        await message.reply('❌ Unknown command. Use `!romc-mvp` to see available commands.');
+        await message.reply('❌ ไม่พบคำสั่งนี้\nกรุณาใช้คำสั่ง `!romc-mvp` เพื่อดูรายการคำสั่งที่สามารถใช้งานได้ทั้งหมด');
       }
       
     } catch (err) {
       console.error('Error handling notifications command:', err);
-      await message.reply('❌ An error occurred while processing your command.');
+      await message.reply('❌ เกิดข้อผิดพลาดในการประมวลผลคำสั่งของคุณ');
     }
   }
 });
