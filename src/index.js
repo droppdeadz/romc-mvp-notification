@@ -140,14 +140,14 @@ function createNotificationMenu(selectedTimes = [], autoApply = false) {
       new StringSelectMenuBuilder()
         .setCustomId('notification_times')
         .setPlaceholder(selectedTimes.length > 0 
-          ? `Modify your ${selectedTimes.length} selected time(s)` 
-          : 'Select notification times')
+          ? `แก้ไข ${selectedTimes.length} เวลาที่เลือกไว้` 
+          : 'เลือกเวลาการแจ้งเตือน')
         .setMinValues(0)
         .setMaxValues(NOTIFICATION_TIMES.length)
         .addOptions(NOTIFICATION_TIMES.map(time => ({
           label: time.label,
           value: time.value,
-          description: `Get notified at ${time.label}`,
+          description: `รับแจ้งเตือนในเวลา ${time.label}`,
           default: selectedTimes.includes(time.value)
         })))
     );
@@ -156,11 +156,11 @@ function createNotificationMenu(selectedTimes = [], autoApply = false) {
     .addComponents(
       new ButtonBuilder()
         .setCustomId('auto_apply_yes')
-        .setLabel('Save as default times')
+        .setLabel('บันทึกเป็นเวลาเริ่มต้น')
         .setStyle(autoApply ? ButtonStyle.Primary : ButtonStyle.Success),
       new ButtonBuilder()
         .setCustomId('auto_apply_no')
-        .setLabel('One-time only')
+        .setLabel('เฉพาะครั้งนี้')
         .setStyle(!autoApply ? ButtonStyle.Primary : ButtonStyle.Secondary)
     );
   
@@ -460,18 +460,18 @@ client.on('interactionCreate', async interaction => {
       .addComponents(
         new ButtonBuilder()
           .setCustomId('auto_apply_yes')
-          .setLabel('Save as default times')
+          .setLabel('บันทึกเป็นเวลาเริ่มต้น')
           .setStyle(ButtonStyle.Success),
         new ButtonBuilder()
           .setCustomId('auto_apply_no')
-          .setLabel('One-time only')
+          .setLabel('เฉพาะครั้งนี้')
           .setStyle(ButtonStyle.Secondary)
       );
     
     // Create the embed with the user's selections
     const updatedEmbed = new EmbedBuilder()
-      .setTitle('🔔 Notification Times')
-      .setDescription(`✅ **Selection Menu**\n\nSelect your notification times using the dropdown below.`)
+      .setTitle('🔔 เวลาแจ้งเตือน')
+      .setDescription(`✅ **เมนูเลือกเวลา**\n\nเลือกเวลาการแจ้งเตือนของคุณโดยเลือกจากรายการด้านล่าง`)
       .setColor('#5865F2');
     
     // Update the original message with a generic notice
@@ -487,8 +487,8 @@ client.on('interactionCreate', async interaction => {
     }).join('\n');
     
     const userConfirmationEmbed = new EmbedBuilder()
-      .setTitle(`🔔 Your Notification Times`)
-      .setDescription(`**Your selected times:**\n${timesList}\n\n**You'll receive:**\n• ⏰ 5-minute reminders\n• 🔔 Main notifications\n\nSelect either "Save as default times" or "One-time only" in the channel.`)
+      .setTitle(`🔔 เวลาแจ้งเตือนของคุณ`)
+      .setDescription(`**เวลาที่คุณเลือก:**\n${timesList}\n\n**คุณจะได้รับ:**\n• ⏰ แจ้งเตือนล่วงหน้า 5 นาที\n\nเลือกระหว่าง "บันทึกเป็นเวลาเริ่มต้น" หรือ "เฉพาะครั้งนี้" ในช่องที่คุณส่งข้อความ`)
       .setColor('#00FF00')
       .setFooter({ text: 'ROMC MVP Notification System' });
     
@@ -580,7 +580,7 @@ client.on('messageCreate', async message => {
         // Show help message
         const helpEmbed = new EmbedBuilder()
           .setTitle('🔔 ROMC MVP Notification Bot - Help')
-          .setDescription('Available commands:')
+          .setDescription('รายการคำสั่งที่สามารถใช้งานได้:')
           .addFields(
             { name: '`!romc-mvp`', value: 'แสดงคำแนะนำการใช้งาน', inline: false },
             { name: '`!romc-mvp setup`', value: 'ตั้งค่าเวลาแจ้งเตือน', inline: false },
