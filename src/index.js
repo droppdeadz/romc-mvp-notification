@@ -78,6 +78,19 @@ async function saveUserPreferences(prefs) {
   }
 }
 
+// Initialize user preferences with default values
+function initUserPreferences(userId, userPrefs) {
+  if (!userPrefs[userId]) {
+    userPrefs[userId] = { 
+      times: [],          // Selected notification times
+      autoApply: false,   // Whether to apply preferences automatically each day
+      paused: false,      // Whether notifications are temporarily paused
+      scheduledJobs: []   // IDs of active scheduled jobs
+    };
+  }
+  return userPrefs[userId];
+}
+
 // Create notification select menu
 function createNotificationMenu() {
   const row = new ActionRowBuilder()
@@ -98,11 +111,11 @@ function createNotificationMenu() {
     .addComponents(
       new ButtonBuilder()
         .setCustomId('auto_apply_yes')
-        .setLabel('Auto-apply for next day')
+        .setLabel('Save as default times')
         .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
         .setCustomId('auto_apply_no')
-        .setLabel('Just for today')
+        .setLabel('One-time only')
         .setStyle(ButtonStyle.Secondary)
     );
   
@@ -112,8 +125,8 @@ function createNotificationMenu() {
 // Send daily notification selector
 async function sendDailySelector(channel) {
   const embed = new EmbedBuilder()
-    .setTitle('🔔 Notification Times')
-    .setDescription('Select the times you want to be notified today')
+    .setTitle('🔔 ROMC MVP Notification Times')
+    .setDescription('Select the times you want to be notified.\n\nYou can choose to save these as your default times or use them just for today.\n\nYour selections will be private and notifications will be sent only to you.')
     .setColor('#5865F2');
 
   await channel.send({
@@ -152,9 +165,20 @@ async function setupNotifications() {
       // Schedule 5-minute early warning
       const earlyWarningJob = cron.schedule(timeInfo.earlyWarningCron, async () => {
         try {
+          // Skip if user has paused notifications
+          if (prefs.paused) return;
+          
           const channel = await client.channels.fetch(process.env.NOTIFICATION_CHANNEL_ID);
           if (channel) {
-            channel.send(`<@${userId}> ⏰ **5-minute reminder**: Your notification for ${timeInfo.label} is coming up soon!`);
+            const user = await client.users.fetch(userId);
+            if (user) {
+              try {
+                await user.send(`⏰ **5-minute reminder**: Your notification for ${timeInfo.label} is coming up soon!`);
+              } catch (dmErr) {
+                // If DM fails, fall back to channel message that only mentions the user
+                channel.send(`<@${userId}> ⏰ **5-minute reminder**: Your notification for ${timeInfo.label} is coming up soon!`);
+              }
+            }
           }
         } catch (err) {
           console.error(`Error sending early warning to user ${userId}:`, err);
@@ -164,14 +188,35 @@ async function setupNotifications() {
       // Schedule main notification
       const mainJob = cron.schedule(timeInfo.cronTime, async () => {
         try {
+          // Skip if user has paused notifications
+          if (prefs.paused) return;
+          
           const channel = await client.channels.fetch(process.env.NOTIFICATION_CHANNEL_ID);
           if (channel) {
-            channel.send(`<@${userId}> 🔔 **Time's up!** This is your notification for ${timeInfo.label}`);
+            const user = await client.users.fetch(userId);
+            if (user) {
+              try {
+                await user.send(`🔔 **Time's up!** This is your notification for ${timeInfo.label}`);
+              } catch (dmErr) {
+                // If DM fails, fall back to channel message that only mentions the user
+                channel.send(`<@${userId}> 🔔 **Time's up!** This is your notification for ${timeInfo.label}`);
+              }
+            }
           }
         } catch (err) {
           console.error(`Error sending notification to user ${userId}:`, err);
         }
       });
+      
+      // If notifications are paused, stop the job immediately
+      if (prefs.paused) {
+        if (earlyWarningJob && typeof earlyWarningJob.stop === 'function') {
+          earlyWarningJob.stop();
+        }
+        if (mainJob && typeof mainJob.stop === 'function') {
+          mainJob.stop();
+        }
+      }
       
       // Store job IDs for future reference
       if (earlyWarningJob) {
@@ -222,13 +267,15 @@ async function applyAutoPreferences() {
     // For each user who has opted in for auto-apply
     Object.entries(userPrefs).forEach(([userId, prefs]) => {
       if (prefs.autoApply && prefs.times && prefs.times.length > 0) {
-        // Keep their preferences the same
+        // Keep their preferences the same, just maintain their current paused state
         updated = true;
       } else {
-        // Reset preferences for users who didn't opt in
+        // Reset preferences for users who didn't opt in, but maintain their paused state
+        const wasPaused = prefs.paused; // Remember paused state
         if (prefs.times && prefs.times.length > 0) {
           prefs.times = [];
           updated = true;
+          prefs.paused = wasPaused; // Restore paused state
         }
       }
     });
@@ -269,7 +316,7 @@ client.on('interactionCreate', async interaction => {
     
     // Update user's selected times
     if (!userPrefs[userId]) {
-      userPrefs[userId] = { times: [], autoApply: false };
+      userPrefs[userId] = initUserPreferences(userId, userPrefs);
     }
     
     userPrefs[userId].times = selectedTimes;
@@ -299,34 +346,40 @@ client.on('interactionCreate', async interaction => {
       .addComponents(
         new ButtonBuilder()
           .setCustomId('auto_apply_yes')
-          .setLabel('Auto-apply for next day')
+          .setLabel('Save as default times')
           .setStyle(ButtonStyle.Success),
         new ButtonBuilder()
           .setCustomId('auto_apply_no')
-          .setLabel('Just for today')
+          .setLabel('One-time only')
           .setStyle(ButtonStyle.Secondary)
       );
     
-    // Update the original message with disabled dropdown
+    // Create the embed with the user's selections
     const updatedEmbed = new EmbedBuilder()
       .setTitle('🔔 Notification Times')
-      .setDescription(`✅ **Selection Complete!**\n\n${interaction.user.username} selected:\n${selectedTimes.map(t => {
-        const time = NOTIFICATION_TIMES.find(nt => nt.value === t);
-        return `• ${time ? time.label : t}`;
-      }).join('\n')}\n\nYou'll receive:\n• ⏰ 5-minute reminders\n• 🔔 Main notifications`)
-      .setColor('#00FF00');
+      .setDescription(`✅ **Selection Menu**\n\nSelect your notification times using the dropdown below.`)
+      .setColor('#5865F2');
     
+    // Update the original message with a generic notice
     await interaction.update({
       embeds: [updatedEmbed],
       components: [disabledRow, autoApplyRow]
     });
     
-    // Send ephemeral confirmation
+    // Send a detailed selection confirmation as ephemeral message to the user
+    const timesList = selectedTimes.map(t => {
+      const time = NOTIFICATION_TIMES.find(nt => nt.value === t);
+      return `• ${time ? time.label : t}`;
+    }).join('\n');
+    
+    const userConfirmationEmbed = new EmbedBuilder()
+      .setTitle(`🔔 Your Notification Times`)
+      .setDescription(`**Your selected times:**\n${timesList}\n\n**You'll receive:**\n• ⏰ 5-minute reminders\n• 🔔 Main notifications\n\nSelect either "Save as default times" or "One-time only" in the channel.`)
+      .setColor('#00FF00')
+      .setFooter({ text: 'ROMC MVP Notification System' });
+    
     await interaction.followUp({ 
-      content: `Your notification times have been updated! You'll be notified at: ${selectedTimes.map(t => {
-        const time = NOTIFICATION_TIMES.find(nt => nt.value === t);
-        return time ? time.label : t;
-      }).join(', ')}`, 
+      embeds: [userConfirmationEmbed],
       ephemeral: true 
     });
   }
@@ -342,7 +395,7 @@ client.on('interactionCreate', async interaction => {
       
       // Ensure user exists in preferences
       if (!userPrefs[userId]) {
-        userPrefs[userId] = { times: [], autoApply: false };
+        userPrefs[userId] = initUserPreferences(userId, userPrefs);
       }
       
       // Update auto-apply setting
@@ -353,8 +406,8 @@ client.on('interactionCreate', async interaction => {
       
       await interaction.reply({ 
         content: autoApply 
-          ? 'Your settings will automatically be applied each day.' 
-          : 'Your settings will only apply for today.',
+          ? 'Your notification settings have been saved as your default times. They will be automatically applied each day.' 
+          : 'Your notification settings will only apply for today and will be reset tomorrow.',
         ephemeral: true 
       });
     }
@@ -365,8 +418,8 @@ client.on('messageCreate', async message => {
   // Skip bot messages
   if (message.author.bot) return;
   
-  // Handle !notifications commands
-  if (message.content.startsWith('!notifications')) {
+  // Handle !romc-mvp commands (changed from !notifications)
+  if (message.content.startsWith('!romc-mvp')) {
     const args = message.content.split(' ');
     const command = args[1];
     
@@ -377,17 +430,21 @@ client.on('messageCreate', async message => {
           .setTitle('🔔 ROMC MVP Notification Bot - Help')
           .setDescription('Available commands:')
           .addFields(
-            { name: '`!notifications`', value: 'Show this help message', inline: false },
-            { name: '`!notifications setting`', value: 'Open notification time selection menu', inline: false },
-            { name: '`!notifications me`', value: 'Show your current notification times', inline: false },
-            { name: '`!notifications @user`', value: 'Show notification times for mentioned user', inline: false }
+            { name: '`!romc-mvp`', value: 'Show this help message', inline: false },
+            { name: '`!romc-mvp setup`', value: 'Open notification time selection menu', inline: false },
+            { name: '`!romc-mvp me`', value: 'Show your current notification times', inline: false },
+            { name: '`!romc-mvp schedule`', value: 'Preview upcoming MVP times', inline: false },
+            { name: '`!romc-mvp stop`', value: 'Clear times and stop all notifications', inline: false },
+            { name: '`!romc-mvp pause`', value: 'Temporarily disable notifications', inline: false },
+            { name: '`!romc-mvp resume`', value: 'Re-enable paused notifications', inline: false },
+            { name: '`!romc-mvp @user`', value: 'Show notification times for mentioned user', inline: false }
           )
           .setColor('#5865F2')
           .setFooter({ text: 'ROMC MVP Notification System' });
         
         await message.reply({ embeds: [helpEmbed] });
         
-      } else if (command === 'setting') {
+      } else if (command === 'setup' || command === 'setting') {
         // Send notification selection menu
         await sendDailySelector(message.channel);
         await message.reply('Notification selection menu sent!');
@@ -396,10 +453,17 @@ client.on('messageCreate', async message => {
         // Show current user's notification times
         const userPrefs = await loadUserPreferences();
         const userId = message.author.id;
+        
+        // Initialize user if they don't exist yet
+        if (!userPrefs[userId]) {
+          userPrefs[userId] = initUserPreferences(userId, userPrefs);
+          await saveUserPreferences(userPrefs);
+        }
+        
         const userSettings = userPrefs[userId];
         
-        if (!userSettings || !userSettings.times || userSettings.times.length === 0) {
-          await message.reply('❌ You have no notification times set. Use `!notifications setting` to configure them.');
+        if (!userSettings.times || userSettings.times.length === 0) {
+          await message.reply('❌ You have no notification times set. Use `!romc-mvp setup` to configure them.');
           return;
         }
         
@@ -410,11 +474,173 @@ client.on('messageCreate', async message => {
         
         const userEmbed = new EmbedBuilder()
           .setTitle(`🔔 ${message.author.username}'s Notification Times`)
-          .setDescription(`**Your scheduled times:**\n${timesList}\n\n**Auto-apply:** ${userSettings.autoApply ? '✅ Enabled' : '❌ Disabled'}\n\n**You'll receive:**\n• ⏰ 5-minute reminders\n• 🔔 Main notifications`)
+          .setDescription(`**Your scheduled times:**\n${timesList}\n\n**Auto-apply:** ${userSettings.autoApply ? '✅ Enabled' : '❌ Disabled'}\n**Status:** ${userSettings.paused ? '⏸️ Paused' : '▶️ Active'}\n\n**You'll receive:**\n• ⏰ 5-minute reminders\n• 🔔 Main notifications`)
           .setColor('#00FF00')
           .setThumbnail(message.author.displayAvatarURL());
         
         await message.reply({ embeds: [userEmbed] });
+        
+      } else if (command === 'schedule') {
+        // Show upcoming MVP times
+        const currentTime = new Date();
+        const currentHour = currentTime.getHours();
+        const currentMinute = currentTime.getMinutes();
+        
+        // Sort times by how soon they'll occur
+        const sortedTimes = [...NOTIFICATION_TIMES].sort((a, b) => {
+          const [aHour, aMinute] = a.value.split(':').map(Number);
+          const [bHour, bMinute] = b.value.split(':').map(Number);
+          
+          // Convert to minutes since midnight for easier comparison
+          let aMinSinceMidnight = aHour * 60 + aMinute;
+          let bMinSinceMidnight = bHour * 60 + bMinute;
+          let currentMinSinceMidnight = currentHour * 60 + currentMinute;
+          
+          // Calculate minutes until each time occurs
+          let aMinUntil = aMinSinceMidnight - currentMinSinceMidnight;
+          let bMinUntil = bMinSinceMidnight - currentMinSinceMidnight;
+          
+          // If the time has passed today, it will happen tomorrow (add 24 hours)
+          if (aMinUntil <= 0) aMinUntil += 24 * 60;
+          if (bMinUntil <= 0) bMinUntil += 24 * 60;
+          
+          return aMinUntil - bMinUntil;
+        });
+        
+        // Get the next 5 times
+        const upcomingTimes = sortedTimes.slice(0, 5);
+        const timesList = upcomingTimes.map(time => {
+          const [hour, minute] = time.value.split(':').map(Number);
+          let timeUntil = (hour * 60 + minute) - (currentHour * 60 + currentMinute);
+          if (timeUntil <= 0) timeUntil += 24 * 60; // If it's tomorrow
+          
+          const hoursUntil = Math.floor(timeUntil / 60);
+          const minutesUntil = timeUntil % 60;
+          
+          return `• ${time.label} (in ${hoursUntil}h ${minutesUntil}m)`;
+        }).join('\n');
+        
+        const scheduleEmbed = new EmbedBuilder()
+          .setTitle('🕒 Upcoming MVP Times')
+          .setDescription(`**Next 5 MVP times:**\n${timesList}`)
+          .setColor('#5865F2')
+          .setFooter({ text: 'ROMC MVP Notification System' });
+        
+        await message.reply({ embeds: [scheduleEmbed] });
+        
+      } else if (command === 'stop') {
+        // Clear times and stop all notifications
+        const userPrefs = await loadUserPreferences();
+        const userId = message.author.id;
+        
+        if (!userPrefs[userId]) {
+          userPrefs[userId] = initUserPreferences(userId, userPrefs);
+        } else {
+          userPrefs[userId].times = [];
+          userPrefs[userId].autoApply = false;
+          userPrefs[userId].paused = false;
+          
+          // Clear any scheduled jobs
+          if (userPrefs[userId].scheduledJobs) {
+            userPrefs[userId].scheduledJobs.forEach(jobId => {
+              const job = activeJobs[jobId];
+              if (job && typeof job.cancel === 'function') {
+                job.cancel();
+                delete activeJobs[jobId];
+              }
+            });
+            userPrefs[userId].scheduledJobs = [];
+          }
+        }
+        
+        // Save preferences
+        await saveUserPreferences(userPrefs);
+        
+        const stopEmbed = new EmbedBuilder()
+          .setTitle('🛑 Notifications Stopped')
+          .setDescription('All your notification times have been cleared and notifications have been stopped.')
+          .setColor('#FF0000');
+        
+        await message.reply({ embeds: [stopEmbed] });
+        
+      } else if (command === 'pause') {
+        // Temporarily disable notifications
+        const userPrefs = await loadUserPreferences();
+        const userId = message.author.id;
+        
+        // Initialize user if they don't exist yet
+        if (!userPrefs[userId]) {
+          userPrefs[userId] = initUserPreferences(userId, userPrefs);
+        }
+        
+        if (!userPrefs[userId].times || userPrefs[userId].times.length === 0) {
+          await message.reply('❌ You have no notification times set. Use `!romc-mvp setup` to configure them.');
+          return;
+        }
+        
+        userPrefs[userId].paused = true;
+        
+        // Save preferences
+        await saveUserPreferences(userPrefs);
+        
+        // Pause any active jobs
+        if (userPrefs[userId].scheduledJobs) {
+          userPrefs[userId].scheduledJobs.forEach(jobId => {
+            const job = activeJobs[jobId];
+            if (job && typeof job.stop === 'function') {
+              job.stop();
+            }
+          });
+        }
+        
+        const pauseEmbed = new EmbedBuilder()
+          .setTitle('⏸️ Notifications Paused')
+          .setDescription('Your notifications have been temporarily paused. Use `!romc-mvp resume` to resume them.')
+          .setColor('#FFA500');
+        
+        await message.reply({ embeds: [pauseEmbed] });
+        
+      } else if (command === 'resume') {
+        // Re-enable paused notifications
+        const userPrefs = await loadUserPreferences();
+        const userId = message.author.id;
+        
+        // Initialize user if they don't exist yet
+        if (!userPrefs[userId]) {
+          userPrefs[userId] = initUserPreferences(userId, userPrefs);
+        }
+        
+        if (!userPrefs[userId].times || userPrefs[userId].times.length === 0) {
+          await message.reply('❌ You have no notification times set. Use `!romc-mvp setup` to configure them.');
+          return;
+        }
+        
+        if (!userPrefs[userId].paused) {
+          await message.reply('ℹ️ Your notifications are already active.');
+          return;
+        }
+        
+        userPrefs[userId].paused = false;
+        
+        // Save preferences
+        await saveUserPreferences(userPrefs);
+        
+        // Resume any paused jobs
+        if (userPrefs[userId].scheduledJobs) {
+          userPrefs[userId].scheduledJobs.forEach(jobId => {
+            const job = activeJobs[jobId];
+            if (job && typeof job.start === 'function') {
+              job.start();
+            }
+          });
+        }
+        
+        const resumeEmbed = new EmbedBuilder()
+          .setTitle('▶️ Notifications Resumed')
+          .setDescription('Your notifications have been resumed.')
+          .setColor('#00FF00');
+        
+        await message.reply({ embeds: [resumeEmbed] });
         
       } else if (message.mentions.users.size > 0) {
         // Show mentioned user's notification times
@@ -434,7 +660,7 @@ client.on('messageCreate', async message => {
         
         const mentionedUserEmbed = new EmbedBuilder()
           .setTitle(`🔔 ${mentionedUser.username}'s Notification Times`)
-          .setDescription(`**Scheduled times:**\n${timesList}\n\n**Auto-apply:** ${userSettings.autoApply ? '✅ Enabled' : '❌ Disabled'}`)
+          .setDescription(`**Scheduled times:**\n${timesList}\n\n**Auto-apply:** ${userSettings.autoApply ? '✅ Enabled' : '❌ Disabled'}\n**Status:** ${userSettings.paused ? '⏸️ Paused' : '▶️ Active'}`)
           .setColor('#FFA500')
           .setThumbnail(mentionedUser.displayAvatarURL());
         
@@ -442,7 +668,7 @@ client.on('messageCreate', async message => {
         
       } else {
         // Unknown command
-        await message.reply('❌ Unknown command. Use `!notifications` to see available commands.');
+        await message.reply('❌ Unknown command. Use `!romc-mvp` to see available commands.');
       }
       
     } catch (err) {
