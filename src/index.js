@@ -1,4 +1,19 @@
 require('dotenv').config();
+
+// Check if essential environment variables are disabled
+const isBotDisabled = process.env.BOT_TOKEN === 'DISABLED';
+const isChannelDisabled = process.env.NOTIFICATION_CHANNEL_ID === 'DISABLED';
+
+if (isBotDisabled) {
+  console.log('Bot is disabled (BOT_TOKEN=DISABLED). Exiting...');
+  process.exit(0);
+}
+
+if (isChannelDisabled) {
+  console.log('Notifications disabled (NOTIFICATION_CHANNEL_ID=DISABLED). Exiting...');
+  process.exit(0);
+}
+
 const { Client, GatewayIntentBits, Partials, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const cron = require('node-cron');
 const fs = require('fs').promises;
@@ -208,6 +223,11 @@ async function sendDailySelector(channel, userId = null) {
 
 // Set up notification schedules
 async function setupNotifications() {
+  if (isChannelDisabled) {
+    console.log('Notifications disabled (NOTIFICATION_CHANNEL_ID=DISABLED). Skipping notification setup...');
+    return;
+  }
+
   try {
     const userPrefs = await loadUserPreferences();
     
@@ -313,6 +333,11 @@ async function setupNotifications() {
 
 // Schedule the daily 8 AM message
 function scheduleDailyMessage() {
+  if (isChannelDisabled) {
+    console.log('Daily message scheduling disabled (NOTIFICATION_CHANNEL_ID=DISABLED)');
+    return;
+  }
+
   cron.schedule('0 8 * * *', async () => {
     try {
       const channel = await client.channels.fetch(process.env.NOTIFICATION_CHANNEL_ID);
@@ -331,6 +356,11 @@ function scheduleDailyMessage() {
 
 // Apply saved preferences for users who opted in to auto-apply
 async function applyAutoPreferences() {
+  if (isChannelDisabled) {
+    console.log('Auto preferences disabled (NOTIFICATION_CHANNEL_ID=DISABLED)');
+    return;
+  }
+
   try {
     const userPrefs = await loadUserPreferences();
     let updated = false;
@@ -554,6 +584,11 @@ client.on('messageCreate', async message => {
         await message.reply({ embeds: [helpEmbed] });
         
       } else if (command === 'setup' || command === 'setting') {
+        if (isChannelDisabled) {
+          await message.reply('❌ Notification service is currently disabled by the administrator.');
+          return;
+        }
+        
         // Send notification selection menu
         await sendDailySelector(message.channel, message.author.id);
         
@@ -789,5 +824,5 @@ client.on('messageCreate', async message => {
   }
 });
 
-// Login to Discord
+// Login to Discord with a check for disabled status
 client.login(process.env.BOT_TOKEN); 
