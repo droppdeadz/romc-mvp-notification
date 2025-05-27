@@ -34,6 +34,8 @@ const activeJobs = {};
 
 // Define notification times from the image
 const NOTIFICATION_TIMES = [
+  { label: '07:30 น.', value: '07:30', cronTime: '30 7 * * *', earlyWarningCron: '25 7 * * *' },
+  { label: '09:00 น.', value: '09:00', cronTime: '0 9 * * *', earlyWarningCron: '55 8 * * *' },
   { label: '10:30 น.', value: '10:30', cronTime: '30 10 * * *', earlyWarningCron: '25 10 * * *' },
   { label: '12:00 น.', value: '12:00', cronTime: '0 12 * * *', earlyWarningCron: '55 11 * * *' },
   { label: '13:30 น.', value: '13:30', cronTime: '30 13 * * *', earlyWarningCron: '25 13 * * *' },
@@ -48,8 +50,6 @@ const NOTIFICATION_TIMES = [
   { label: '03:00 น.', value: '03:00', cronTime: '0 3 * * *', earlyWarningCron: '55 2 * * *' },
   { label: '04:30 น.', value: '04:30', cronTime: '30 4 * * *', earlyWarningCron: '25 4 * * *' },
   { label: '06:00 น.', value: '06:00', cronTime: '0 6 * * *', earlyWarningCron: '55 5 * * *' },
-  { label: '07:30 น.', value: '07:30', cronTime: '30 7 * * *', earlyWarningCron: '25 7 * * *' },
-  { label: '09:00 น.', value: '09:00', cronTime: '0 9 * * *', earlyWarningCron: '55 8 * * *' }
 ];
 
 // Initialize Discord client
