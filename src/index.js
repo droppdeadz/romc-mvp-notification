@@ -85,25 +85,29 @@ function initUserPreferences(userId, userPrefs) {
       times: [],          // Selected notification times
       autoApply: false,   // Whether to apply preferences automatically each day
       paused: false,      // Whether notifications are temporarily paused
-      scheduledJobs: []   // IDs of active scheduled jobs
+      scheduledJobs: [],  // IDs of active scheduled jobs
+      lastSetupMessageId: null  // ID of the last setup message sent
     };
   }
   return userPrefs[userId];
 }
 
 // Create notification select menu
-function createNotificationMenu() {
+function createNotificationMenu(selectedTimes = [], autoApply = false) {
   const row = new ActionRowBuilder()
     .addComponents(
       new StringSelectMenuBuilder()
         .setCustomId('notification_times')
-        .setPlaceholder('Select notification times')
+        .setPlaceholder(selectedTimes.length > 0 
+          ? `Modify your ${selectedTimes.length} selected time(s)` 
+          : 'Select notification times')
         .setMinValues(0)
         .setMaxValues(NOTIFICATION_TIMES.length)
         .addOptions(NOTIFICATION_TIMES.map(time => ({
           label: time.label,
           value: time.value,
-          description: `Get notified at ${time.label}`
+          description: `Get notified at ${time.label}`,
+          default: selectedTimes.includes(time.value)
         })))
     );
   
@@ -112,27 +116,94 @@ function createNotificationMenu() {
       new ButtonBuilder()
         .setCustomId('auto_apply_yes')
         .setLabel('Save as default times')
-        .setStyle(ButtonStyle.Success),
+        .setStyle(autoApply ? ButtonStyle.Primary : ButtonStyle.Success),
       new ButtonBuilder()
         .setCustomId('auto_apply_no')
         .setLabel('One-time only')
-        .setStyle(ButtonStyle.Secondary)
+        .setStyle(!autoApply ? ButtonStyle.Primary : ButtonStyle.Secondary)
     );
   
   return [row, autoApplyRow];
 }
 
 // Send daily notification selector
-async function sendDailySelector(channel) {
-  const embed = new EmbedBuilder()
-    .setTitle('🔔 ROMC MVP Notification Times')
-    .setDescription('Select the times you want to be notified.\n\nYou can choose to save these as your default times or use them just for today.\n\nYour selections will be private and notifications will be sent only to you.')
-    .setColor('#5865F2');
+async function sendDailySelector(channel, userId = null) {
+  try {
+    // Default to empty selection
+    let selectedTimes = [];
+    let autoApply = false;
+    
+    // If userId is provided, try to delete the previous setup message and get selected times
+    if (userId) {
+      const userPrefs = await loadUserPreferences();
+      
+      // Initialize user if they don't exist
+      if (!userPrefs[userId]) {
+        userPrefs[userId] = initUserPreferences(userId, userPrefs);
+      } else if (userPrefs[userId].times) {
+        // Get the user's current selected times
+        selectedTimes = userPrefs[userId].times;
+        autoApply = userPrefs[userId].autoApply;
+      }
+      
+      // Check for previous setup message and delete it
+      if (userPrefs[userId].lastSetupMessageId) {
+        try {
+          const previousMessage = await channel.messages.fetch(userPrefs[userId].lastSetupMessageId);
+          if (previousMessage) {
+            await previousMessage.delete().catch(err => console.error(`Error deleting previous setup message: ${err}`));
+          }
+        } catch (err) {
+          // Message might not exist anymore, just continue
+          console.log(`Could not find previous setup message to delete: ${err}`);
+        }
+      }
+    }
+    
+    let embedDescription = 'Select the times you want to be notified.\n\n';
+    
+    if (selectedTimes.length > 0) {
+      const timeLabels = selectedTimes.map(timeValue => {
+        const time = NOTIFICATION_TIMES.find(t => t.value === timeValue);
+        return time ? `• ${time.label}` : `• ${timeValue}`;
+      }).join('\n');
+      
+      embedDescription += `**Your Current Notifications:**\n${timeLabels}\n\n`;
+      
+      // Show auto-apply preference if available
+      if (userId && userPrefs[userId]) {
+        embedDescription += `**Settings:**\n`;
+        embedDescription += `• ${userPrefs[userId].autoApply ? '✅ Saved as default times' : '⏱️ One-time only'}\n`;
+        embedDescription += `• ${userPrefs[userId].paused ? '⏸️ Notifications paused' : '▶️ Notifications active'}\n\n`;
+      }
+    }
+    
+    embedDescription += 'You can choose to save these as your default times or use them just for today.\n\nYour selections will be private and notifications will be sent only to you.';
+    
+    const embed = new EmbedBuilder()
+      .setTitle('🔔 ROMC MVP Notification Times')
+      .setDescription(embedDescription)
+      .setColor('#5865F2');
 
-  await channel.send({
-    embeds: [embed],
-    components: createNotificationMenu()
-  });
+    const sentMessage = await channel.send({
+      embeds: [embed],
+      components: createNotificationMenu(selectedTimes, autoApply)
+    });
+    
+    // If userId is provided, update the user's lastSetupMessageId
+    if (userId) {
+      const userPrefs = await loadUserPreferences();
+      if (userPrefs[userId]) {
+        userPrefs[userId].lastSetupMessageId = sentMessage.id;
+        await saveUserPreferences(userPrefs);
+      }
+    }
+    
+    return sentMessage;
+  } catch (err) {
+    console.error(`Error in sendDailySelector: ${err}`);
+    return null;
+  }
 }
 
 // Set up notification schedules
@@ -249,7 +320,7 @@ function scheduleDailyMessage() {
         // Apply saved preferences from previous day for users who opted in
         await applyAutoPreferences();
         
-        // Send daily selection message
+        // Send daily selection message (no userId since it's not tied to a specific user)
         await sendDailySelector(channel);
       }
     } catch (err) {
@@ -382,6 +453,25 @@ client.on('interactionCreate', async interaction => {
       embeds: [userConfirmationEmbed],
       ephemeral: true 
     });
+
+    // Set a timeout to delete the message if no button is clicked
+    // Store the timeout ID in a global object so it can be cancelled if a button is clicked
+    const messageTimeouts = activeJobs.messageTimeouts || (activeJobs.messageTimeouts = {});
+    const messageId = interaction.message.id;
+    messageTimeouts[messageId] = setTimeout(async () => {
+      try {
+        // Try to fetch and delete the message
+        const channel = interaction.message.channel;
+        const message = await channel.messages.fetch(messageId);
+        if (message && message.deletable) {
+          await message.delete();
+        }
+        // Clean up the timeout reference
+        delete messageTimeouts[messageId];
+      } catch (err) {
+        console.error(`Error auto-deleting setup message: ${err}`);
+      }
+    }, 60000); // Delete after 1 minute if no button is clicked
   }
   
   // Handle button interactions for auto-apply
@@ -389,6 +479,14 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId === 'auto_apply_yes' || interaction.customId === 'auto_apply_no') {
       const userId = interaction.user.id;
       const autoApply = interaction.customId === 'auto_apply_yes';
+      
+      // Clear any auto-delete timeout for this message
+      const messageTimeouts = activeJobs.messageTimeouts || {};
+      const messageId = interaction.message.id;
+      if (messageTimeouts[messageId]) {
+        clearTimeout(messageTimeouts[messageId]);
+        delete messageTimeouts[messageId];
+      }
       
       // Load current preferences
       const userPrefs = await loadUserPreferences();
@@ -410,6 +508,17 @@ client.on('interactionCreate', async interaction => {
           : 'Your notification settings will only apply for today and will be reset tomorrow.',
         ephemeral: true 
       });
+      
+      // Delete the setup message after a short delay to allow the user to see the confirmation
+      setTimeout(async () => {
+        try {
+          if (interaction.message && interaction.message.deletable) {
+            await interaction.message.delete();
+          }
+        } catch (err) {
+          console.error(`Error deleting message after selection: ${err}`);
+        }
+      }, 5000); // Delete after 5 seconds
     }
   }
 });
@@ -446,8 +555,10 @@ client.on('messageCreate', async message => {
         
       } else if (command === 'setup' || command === 'setting') {
         // Send notification selection menu
-        await sendDailySelector(message.channel);
-        await message.reply('Notification selection menu sent!');
+        await sendDailySelector(message.channel, message.author.id);
+        
+        // Delete the command message to keep the channel clean
+        await message.delete().catch(err => console.error(`Error deleting command message: ${err}`));
         
       } else if (command === 'me') {
         // Show current user's notification times
