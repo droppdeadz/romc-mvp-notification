@@ -13,22 +13,22 @@ const activeJobs = {};
 
 // Define notification times from the image
 const NOTIFICATION_TIMES = [
-  { label: '10:30 AM', value: '10:30', cronTime: '30 10 * * *' },
-  { label: '12:00 PM', value: '12:00', cronTime: '0 12 * * *' },
-  { label: '1:30 PM', value: '13:30', cronTime: '30 13 * * *' },
-  { label: '3:00 PM', value: '15:00', cronTime: '0 15 * * *' },
-  { label: '4:30 PM', value: '16:30', cronTime: '30 16 * * *' },
-  { label: '6:00 PM', value: '18:00', cronTime: '0 18 * * *' },
-  { label: '7:30 PM', value: '19:30', cronTime: '30 19 * * *' },
-  { label: '9:00 PM', value: '21:00', cronTime: '0 21 * * *' },
-  { label: '10:30 PM', value: '22:30', cronTime: '30 22 * * *' },
-  { label: '12:00 AM', value: '00:00', cronTime: '0 0 * * *' },
-  { label: '1:30 AM', value: '01:30', cronTime: '30 1 * * *' },
-  { label: '3:00 AM', value: '03:00', cronTime: '0 3 * * *' },
-  { label: '4:30 AM', value: '04:30', cronTime: '30 4 * * *' },
-  { label: '6:00 AM', value: '06:00', cronTime: '0 6 * * *' },
-  { label: '7:30 AM', value: '07:30', cronTime: '30 7 * * *' },
-  { label: '9:00 AM', value: '09:00', cronTime: '0 9 * * *' }
+  { label: '10:30 AM', value: '10:30', cronTime: '30 10 * * *', earlyWarningCron: '25 10 * * *' },
+  { label: '12:00 PM', value: '12:00', cronTime: '0 12 * * *', earlyWarningCron: '55 11 * * *' },
+  { label: '1:30 PM', value: '13:30', cronTime: '30 13 * * *', earlyWarningCron: '25 13 * * *' },
+  { label: '3:00 PM', value: '15:00', cronTime: '0 15 * * *', earlyWarningCron: '55 14 * * *' },
+  { label: '4:30 PM', value: '16:30', cronTime: '30 16 * * *', earlyWarningCron: '25 16 * * *' },
+  { label: '6:00 PM', value: '18:00', cronTime: '0 18 * * *', earlyWarningCron: '55 17 * * *' },
+  { label: '7:30 PM', value: '19:30', cronTime: '30 19 * * *', earlyWarningCron: '25 19 * * *' },
+  { label: '9:00 PM', value: '21:00', cronTime: '0 21 * * *', earlyWarningCron: '55 20 * * *' },
+  { label: '10:30 PM', value: '22:30', cronTime: '30 22 * * *', earlyWarningCron: '25 22 * * *' },
+  { label: '12:00 AM', value: '00:00', cronTime: '0 0 * * *', earlyWarningCron: '55 23 * * *' },
+  { label: '1:30 AM', value: '01:30', cronTime: '30 1 * * *', earlyWarningCron: '25 1 * * *' },
+  { label: '3:00 AM', value: '03:00', cronTime: '0 3 * * *', earlyWarningCron: '55 2 * * *' },
+  { label: '4:30 AM', value: '04:30', cronTime: '30 4 * * *', earlyWarningCron: '25 4 * * *' },
+  { label: '6:00 AM', value: '06:00', cronTime: '0 6 * * *', earlyWarningCron: '55 5 * * *' },
+  { label: '7:30 AM', value: '07:30', cronTime: '30 7 * * *', earlyWarningCron: '25 7 * * *' },
+  { label: '9:00 AM', value: '09:00', cronTime: '0 9 * * *', earlyWarningCron: '55 8 * * *' }
 ];
 
 // Initialize Discord client
@@ -124,17 +124,21 @@ async function sendDailySelector(channel) {
 
 // Set up notification schedules
 async function setupNotifications() {
-  const userPrefs = await loadUserPreferences();
-  
-  // Schedule notifications for each user and their selected times
-  Object.entries(userPrefs).forEach(([userId, prefs]) => {
+  try {
+    const userPrefs = await loadUserPreferences();
+    
+    // Schedule notifications for each user and their selected times
+    Object.entries(userPrefs).forEach(([userId, prefs]) => {
     if (!prefs.times || !prefs.times.length) return;
     
     // Clear existing schedules if any
     if (prefs.scheduledJobs) {
       prefs.scheduledJobs.forEach(jobId => {
         const job = activeJobs[jobId];
-        if (job) job.cancel();
+        if (job && typeof job.cancel === 'function') {
+          job.cancel();
+          delete activeJobs[jobId];
+        }
       });
     }
     
@@ -145,27 +149,50 @@ async function setupNotifications() {
       const timeInfo = NOTIFICATION_TIMES.find(t => t.value === timeValue);
       if (!timeInfo) return;
       
-      const job = cron.schedule(timeInfo.cronTime, async () => {
+      // Schedule 5-minute early warning
+      const earlyWarningJob = cron.schedule(timeInfo.earlyWarningCron, async () => {
         try {
           const channel = await client.channels.fetch(process.env.NOTIFICATION_CHANNEL_ID);
           if (channel) {
-            channel.send(`<@${userId}> This is your notification for ${timeInfo.label}`);
+            channel.send(`<@${userId}> ⏰ **5-minute reminder**: Your notification for ${timeInfo.label} is coming up soon!`);
+          }
+        } catch (err) {
+          console.error(`Error sending early warning to user ${userId}:`, err);
+        }
+      });
+      
+      // Schedule main notification
+      const mainJob = cron.schedule(timeInfo.cronTime, async () => {
+        try {
+          const channel = await client.channels.fetch(process.env.NOTIFICATION_CHANNEL_ID);
+          if (channel) {
+            channel.send(`<@${userId}> 🔔 **Time's up!** This is your notification for ${timeInfo.label}`);
           }
         } catch (err) {
           console.error(`Error sending notification to user ${userId}:`, err);
         }
       });
       
-      // Store job ID for future reference
-      if (job) {
-        prefs.scheduledJobs.push(job.options.name);
-        activeJobs[job.options.name] = job;
+      // Store job IDs for future reference
+      if (earlyWarningJob) {
+        const earlyJobId = `${userId}_${timeValue}_early`;
+        prefs.scheduledJobs.push(earlyJobId);
+        activeJobs[earlyJobId] = earlyWarningJob;
+      }
+      
+      if (mainJob) {
+        const mainJobId = `${userId}_${timeValue}_main`;
+        prefs.scheduledJobs.push(mainJobId);
+        activeJobs[mainJobId] = mainJob;
       }
     });
   });
   
   // Save updated preferences
   await saveUserPreferences(userPrefs);
+  } catch (err) {
+    console.error('Error setting up notifications:', err);
+  }
 }
 
 // Schedule the daily 8 AM message
@@ -253,7 +280,49 @@ client.on('interactionCreate', async interaction => {
     // Update notifications
     await setupNotifications();
     
-    await interaction.reply({ 
+    // Create disabled dropdown with user's selections
+    const disabledRow = new ActionRowBuilder()
+      .addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('notification_times_disabled')
+          .setPlaceholder(`✅ Selected: ${selectedTimes.length} time(s)`)
+          .setDisabled(true)
+          .addOptions([{
+            label: 'Selection completed',
+            value: 'completed',
+            description: 'You have made your selection'
+          }])
+      );
+    
+    // Keep the auto-apply buttons active
+    const autoApplyRow = new ActionRowBuilder()
+      .addComponents(
+        new ButtonBuilder()
+          .setCustomId('auto_apply_yes')
+          .setLabel('Auto-apply for next day')
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId('auto_apply_no')
+          .setLabel('Just for today')
+          .setStyle(ButtonStyle.Secondary)
+      );
+    
+    // Update the original message with disabled dropdown
+    const updatedEmbed = new EmbedBuilder()
+      .setTitle('🔔 Notification Times')
+      .setDescription(`✅ **Selection Complete!**\n\n${interaction.user.username} selected:\n${selectedTimes.map(t => {
+        const time = NOTIFICATION_TIMES.find(nt => nt.value === t);
+        return `• ${time ? time.label : t}`;
+      }).join('\n')}\n\nYou'll receive:\n• ⏰ 5-minute reminders\n• 🔔 Main notifications`)
+      .setColor('#00FF00');
+    
+    await interaction.update({
+      embeds: [updatedEmbed],
+      components: [disabledRow, autoApplyRow]
+    });
+    
+    // Send ephemeral confirmation
+    await interaction.followUp({ 
       content: `Your notification times have been updated! You'll be notified at: ${selectedTimes.map(t => {
         const time = NOTIFICATION_TIMES.find(nt => nt.value === t);
         return time ? time.label : t;
@@ -293,15 +362,92 @@ client.on('interactionCreate', async interaction => {
 });
 
 client.on('messageCreate', async message => {
-  // Command to manually trigger the notification selection message
-  if (message.content === '!notifications') {
-    // Check if the user has permission (you can add more checks here)
+  // Skip bot messages
+  if (message.author.bot) return;
+  
+  // Handle !notifications commands
+  if (message.content.startsWith('!notifications')) {
+    const args = message.content.split(' ');
+    const command = args[1];
+    
     try {
-      await sendDailySelector(message.channel);
-      await message.reply('Notification selection message sent!');
+      if (!command) {
+        // Show help message
+        const helpEmbed = new EmbedBuilder()
+          .setTitle('🔔 ROMC MVP Notification Bot - Help')
+          .setDescription('Available commands:')
+          .addFields(
+            { name: '`!notifications`', value: 'Show this help message', inline: false },
+            { name: '`!notifications setting`', value: 'Open notification time selection menu', inline: false },
+            { name: '`!notifications me`', value: 'Show your current notification times', inline: false },
+            { name: '`!notifications @user`', value: 'Show notification times for mentioned user', inline: false }
+          )
+          .setColor('#5865F2')
+          .setFooter({ text: 'ROMC MVP Notification System' });
+        
+        await message.reply({ embeds: [helpEmbed] });
+        
+      } else if (command === 'setting') {
+        // Send notification selection menu
+        await sendDailySelector(message.channel);
+        await message.reply('Notification selection menu sent!');
+        
+      } else if (command === 'me') {
+        // Show current user's notification times
+        const userPrefs = await loadUserPreferences();
+        const userId = message.author.id;
+        const userSettings = userPrefs[userId];
+        
+        if (!userSettings || !userSettings.times || userSettings.times.length === 0) {
+          await message.reply('❌ You have no notification times set. Use `!notifications setting` to configure them.');
+          return;
+        }
+        
+        const timesList = userSettings.times.map(timeValue => {
+          const timeInfo = NOTIFICATION_TIMES.find(t => t.value === timeValue);
+          return `• ${timeInfo ? timeInfo.label : timeValue}`;
+        }).join('\n');
+        
+        const userEmbed = new EmbedBuilder()
+          .setTitle(`🔔 ${message.author.username}'s Notification Times`)
+          .setDescription(`**Your scheduled times:**\n${timesList}\n\n**Auto-apply:** ${userSettings.autoApply ? '✅ Enabled' : '❌ Disabled'}\n\n**You'll receive:**\n• ⏰ 5-minute reminders\n• 🔔 Main notifications`)
+          .setColor('#00FF00')
+          .setThumbnail(message.author.displayAvatarURL());
+        
+        await message.reply({ embeds: [userEmbed] });
+        
+      } else if (message.mentions.users.size > 0) {
+        // Show mentioned user's notification times
+        const mentionedUser = message.mentions.users.first();
+        const userPrefs = await loadUserPreferences();
+        const userSettings = userPrefs[mentionedUser.id];
+        
+        if (!userSettings || !userSettings.times || userSettings.times.length === 0) {
+          await message.reply(`❌ ${mentionedUser.username} has no notification times set.`);
+          return;
+        }
+        
+        const timesList = userSettings.times.map(timeValue => {
+          const timeInfo = NOTIFICATION_TIMES.find(t => t.value === timeValue);
+          return `• ${timeInfo ? timeInfo.label : timeValue}`;
+        }).join('\n');
+        
+        const mentionedUserEmbed = new EmbedBuilder()
+          .setTitle(`🔔 ${mentionedUser.username}'s Notification Times`)
+          .setDescription(`**Scheduled times:**\n${timesList}\n\n**Auto-apply:** ${userSettings.autoApply ? '✅ Enabled' : '❌ Disabled'}`)
+          .setColor('#FFA500')
+          .setThumbnail(mentionedUser.displayAvatarURL());
+        
+        await message.reply({ embeds: [mentionedUserEmbed] });
+        
+      } else {
+        // Unknown command
+        await message.reply('❌ Unknown command. Use `!notifications` to see available commands.');
+      }
+      
     } catch (err) {
-      console.error('Error sending notification selector:', err);
-      await message.reply('Failed to send notification selector.');
+      console.error('Error handling notifications command:', err);
+      await message.reply('❌ An error occurred while processing your command.');
     }
   }
 });
