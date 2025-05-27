@@ -13,6 +13,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "dayjs": "^1.11.13",
     "discord.js": "^14.19.3",
     "dotenv": "^16.5.0",
     "node-cron": "^4.0.7"

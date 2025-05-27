@@ -5,6 +5,9 @@ const isBotDisabled = process.env.BOT_TOKEN === 'DISABLED';
 const isChannelDisabled = process.env.NOTIFICATION_CHANNEL_ID === 'DISABLED';
 const isTestMode = process.env.TEST_MODE === 'true' || process.argv.includes('--test');
 
+// Set default timezone if not defined in environment variables
+const DEFAULT_TIMEZONE = process.env.DEFAULT_TIMEZONE || 'Asia/Bangkok';
+
 // Log test mode status
 if (isTestMode) {
   console.log('🧪 Running bot in TEST MODE - notifications can be triggered manually');
@@ -24,6 +27,14 @@ const { Client, GatewayIntentBits, Partials, ActionRowBuilder, StringSelectMenuB
 const cron = require('node-cron');
 const fs = require('fs').promises;
 const path = require('path');
+// For timezone handling
+const dayjs = require('dayjs');
+const utc = require('dayjs/plugin/utc');
+const timezone = require('dayjs/plugin/timezone');
+
+// Initialize dayjs plugins
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 // Database path for storing user preferences
 const DB_PATH = path.join(__dirname, '..', 'data');
@@ -34,6 +45,11 @@ const activeJobs = {};
 
 // Define notification times from the image
 const NOTIFICATION_TIMES = [
+  { label: '00:00 น.', value: '00:00', cronTime: '0 0 * * *', earlyWarningCron: '55 23 * * *' },
+  { label: '01:30 น.', value: '01:30', cronTime: '30 1 * * *', earlyWarningCron: '25 1 * * *' },
+  { label: '03:00 น.', value: '03:00', cronTime: '0 3 * * *', earlyWarningCron: '55 2 * * *' },
+  { label: '04:30 น.', value: '04:30', cronTime: '30 4 * * *', earlyWarningCron: '25 4 * * *' },
+  { label: '06:00 น.', value: '06:00', cronTime: '0 6 * * *', earlyWarningCron: '55 5 * * *' },
   { label: '07:30 น.', value: '07:30', cronTime: '30 7 * * *', earlyWarningCron: '25 7 * * *' },
   { label: '09:00 น.', value: '09:00', cronTime: '0 9 * * *', earlyWarningCron: '55 8 * * *' },
   { label: '10:30 น.', value: '10:30', cronTime: '30 10 * * *', earlyWarningCron: '25 10 * * *' },
@@ -45,12 +61,43 @@ const NOTIFICATION_TIMES = [
   { label: '19:30 น.', value: '19:30', cronTime: '30 19 * * *', earlyWarningCron: '25 19 * * *' },
   { label: '21:00 น.', value: '21:00', cronTime: '0 21 * * *', earlyWarningCron: '55 20 * * *' },
   { label: '22:30 น.', value: '22:30', cronTime: '30 22 * * *', earlyWarningCron: '25 22 * * *' },
-  { label: '00:00 น.', value: '00:00', cronTime: '0 0 * * *', earlyWarningCron: '55 23 * * *' },
-  { label: '01:30 น.', value: '01:30', cronTime: '30 1 * * *', earlyWarningCron: '25 1 * * *' },
-  { label: '03:00 น.', value: '03:00', cronTime: '0 3 * * *', earlyWarningCron: '55 2 * * *' },
-  { label: '04:30 น.', value: '04:30', cronTime: '30 4 * * *', earlyWarningCron: '25 4 * * *' },
-  { label: '06:00 น.', value: '06:00', cronTime: '0 6 * * *', earlyWarningCron: '55 5 * * *' },
 ];
+
+// List of common timezones for selection menu
+const COMMON_TIMEZONES = [
+  { label: 'Asia/Bangkok (ICT)', value: 'Asia/Bangkok' },
+  { label: 'Asia/Tokyo (JST)', value: 'Asia/Tokyo' },
+  { label: 'Europe/London (GMT/BST)', value: 'Europe/London' },
+  { label: 'America/New_York (EST/EDT)', value: 'America/New_York' },
+  { label: 'America/Los_Angeles (PST/PDT)', value: 'America/Los_Angeles' },
+  { label: 'Australia/Sydney (AEST/AEDT)', value: 'Australia/Sydney' },
+  { label: 'Asia/Singapore (SGT)', value: 'Asia/Singapore' },
+  { label: 'Asia/Seoul (KST)', value: 'Asia/Seoul' },
+  { label: 'Europe/Paris (CET/CEST)', value: 'Europe/Paris' },
+  { label: 'UTC', value: 'UTC' }
+];
+
+// Function to convert cron time to a specific timezone
+function convertCronToTimezone(cronExpression, timezone) {
+  // If no timezone specified, use default
+  if (!timezone) return cronExpression;
+  
+  // Parse the cron expression
+  const parts = cronExpression.split(' ');
+  if (parts.length !== 5) return cronExpression; // Invalid cron expression
+  
+  const minute = parseInt(parts[0], 10);
+  const hour = parseInt(parts[1], 10);
+  
+  // Create a dayjs object for today at the specified hour/minute in UTC
+  const utcTime = dayjs.utc().hour(hour).minute(minute).second(0);
+  
+  // Convert to target timezone
+  const targetTime = utcTime.tz(timezone);
+  
+  // Return new cron expression with adjusted hour/minute
+  return `${targetTime.minute()} ${targetTime.hour()} ${parts[2]} ${parts[3]} ${parts[4]}`;
+}
 
 // Initialize Discord client
 const client = new Client({
@@ -107,7 +154,8 @@ function initUserPreferences(userId, userPrefs) {
       autoApply: false,   // Whether to apply preferences automatically each day
       paused: false,      // Whether notifications are temporarily paused
       scheduledJobs: [],  // IDs of active scheduled jobs
-      lastSetupMessageId: null  // ID of the last setup message sent
+      lastSetupMessageId: null,  // ID of the last setup message sent
+      timezone: DEFAULT_TIMEZONE  // Default timezone
     };
   }
   return userPrefs[userId];
@@ -123,8 +171,12 @@ async function sendNotificationToUser(userId, timeLabel, isEarlyWarning = true) 
     
     const channel = await client.channels.fetch(process.env.NOTIFICATION_CHANNEL_ID);
     if (channel) {
+      // Get user's timezone for display
+      const userTimezone = userPrefs[userId]?.timezone || DEFAULT_TIMEZONE;
+      const currentTime = dayjs().tz(userTimezone).format('HH:mm');
+      
       // Always send message to channel with user mention
-      const message = `<@${userId}>\n⏰ **แจ้งเตือนล่วงหน้า 5 นาที**: MVP กำลังจะเกิดในเวลา ${timeLabel}! อย่าลืมเตรียมตัวให้พร้อมนะ!`;
+      const message = `<@${userId}>\n⏰ **แจ้งเตือนล่วงหน้า 5 นาที**: MVP กำลังจะเกิดในเวลา ${timeLabel}! อย่าลืมเตรียมตัวให้พร้อมนะ!\n(เวลาท้องถิ่นของคุณ: ${currentTime} - ${userTimezone})`;
       
       await channel.send(message);
     }
@@ -170,12 +222,35 @@ function createNotificationMenu(selectedTimes = [], autoApply = false) {
   return [row, autoApplyRow];
 }
 
+// Create timezone selection menu
+function createTimezoneMenu(selectedTimezone = DEFAULT_TIMEZONE) {
+  const row = new ActionRowBuilder()
+    .addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('timezone_select')
+        .setPlaceholder(`เลือกโซนเวลา (ปัจจุบัน: ${selectedTimezone})`)
+        .setMinValues(1)
+        .setMaxValues(1)
+        .addOptions(COMMON_TIMEZONES.map(tz => {
+          return {
+            label: tz.label,
+            value: tz.value,
+            description: `ตั้งค่าโซนเวลาเป็น ${tz.value}`,
+            default: tz.value === selectedTimezone
+          };
+        }))
+    );
+  
+  return [row];
+}
+
 // Send daily notification selector
 async function sendDailySelector(channel, userId = null, isEditing = false) {
   try {
     // Default to empty selection
     let selectedTimes = [];
     let autoApply = false;
+    let userTimezone = DEFAULT_TIMEZONE;
     
     // If userId is provided, try to delete the previous setup message and get selected times
     if (userId) {
@@ -188,6 +263,7 @@ async function sendDailySelector(channel, userId = null, isEditing = false) {
         // Get the user's current selected times
         selectedTimes = userPrefs[userId].times;
         autoApply = userPrefs[userId].autoApply;
+        userTimezone = userPrefs[userId].timezone || DEFAULT_TIMEZONE;
       }
       // console.log(userPrefs[userId], userPrefs[userId].lastSetupMessageId);
       
@@ -230,7 +306,8 @@ async function sendDailySelector(channel, userId = null, isEditing = false) {
       if (userId && userPrefs[userId]) {
         embedDescription += `**การตั้งค่าของคุณ:**\n`;
         embedDescription += `• ${userPrefs[userId].autoApply ? '✅ ใช้เวลานี้เป็นค่าตั้งต้น' : '⏱️ แจ้งเตือนเฉพาะครั้งนี้'}\n`;
-        embedDescription += `• ${userPrefs[userId].paused ? '⏸️ การแจ้งเตือนถูกพักไว้' : '▶️ กำลังแจ้งเตือนตามปกติ'}\n\n`;
+        embedDescription += `• ${userPrefs[userId].paused ? '⏸️ การแจ้งเตือนถูกพักไว้' : '▶️ กำลังแจ้งเตือนตามปกติ'}\n`;
+        embedDescription += `• 🌐 โซนเวลา: ${userPrefs[userId].timezone || DEFAULT_TIMEZONE}\n\n`;
       }
     }
     
@@ -275,6 +352,37 @@ async function sendDailySelector(channel, userId = null, isEditing = false) {
   }
 }
 
+// Send timezone selector menu
+async function sendTimezoneSelector(channel, userId) {
+  try {
+    const userPrefs = await loadUserPreferences();
+    
+    // Initialize user if they don't exist
+    if (!userPrefs[userId]) {
+      userPrefs[userId] = initUserPreferences(userId, userPrefs);
+      await saveUserPreferences(userPrefs);
+    }
+    
+    const userTimezone = userPrefs[userId].timezone || DEFAULT_TIMEZONE;
+    const currentTime = dayjs().tz(userTimezone).format('HH:mm');
+    
+    const embed = new EmbedBuilder()
+      .setTitle('🌐 ตั้งค่าโซนเวลา - ROMC MVP Notification')
+      .setDescription(`กรุณาเลือกโซนเวลาที่คุณต้องการใช้สำหรับการแจ้งเตือน\n\n**โซนเวลาปัจจุบันของคุณ:** ${userTimezone}\n**เวลาท้องถิ่นของคุณ:** ${currentTime}\n\nการตั้งค่าโซนเวลาจะช่วยให้คุณได้รับแจ้งเตือนในเวลาที่ถูกต้องสำหรับพื้นที่ของคุณ`)
+      .setColor('#5865F2');
+    
+    const sentMessage = await channel.send({
+      embeds: [embed],
+      components: createTimezoneMenu(userTimezone)
+    });
+    
+    return sentMessage;
+  } catch (err) {
+    console.error(`Error sending timezone selector: ${err}`);
+    return null;
+  }
+}
+
 // Set up notification schedules
 async function setupNotifications() {
   try {
@@ -297,13 +405,19 @@ async function setupNotifications() {
     
     prefs.scheduledJobs = [];
     
+    // Get user's timezone or use default
+    const userTimezone = prefs.timezone || DEFAULT_TIMEZONE;
+    
     // Schedule new notifications
     prefs.times.forEach(timeValue => {
       const timeInfo = NOTIFICATION_TIMES.find(t => t.value === timeValue);
       if (!timeInfo) return;
       
+      // Convert cron expressions to user's timezone
+      const earlyWarningCronInTz = convertCronToTimezone(timeInfo.earlyWarningCron, userTimezone);
+      
       // Schedule 5-minute early warning only
-      const earlyWarningJob = cron.schedule(timeInfo.earlyWarningCron, async () => {
+      const earlyWarningJob = cron.schedule(earlyWarningCronInTz, async () => {
         await sendNotificationToUser(userId, timeInfo.label, true);
       });
       
@@ -573,6 +687,60 @@ client.on('interactionCreate', async interaction => {
     }, 60000); // Delete after 1 minute if no button is clicked
   }
   
+  // Handle timezone selection
+  if (interaction.isStringSelectMenu() && interaction.customId === 'timezone_select') {
+    const userId = interaction.user.id;
+    const selectedTimezone = interaction.values[0];
+    
+    try {
+      // Load current preferences
+      const userPrefs = await loadUserPreferences();
+      
+      // Ensure user exists in preferences
+      if (!userPrefs[userId]) {
+        userPrefs[userId] = initUserPreferences(userId, userPrefs);
+      }
+      
+      // Update timezone setting
+      userPrefs[userId].timezone = selectedTimezone;
+      
+      // Save preferences
+      await saveUserPreferences(userPrefs);
+      
+      // Update notifications with new timezone
+      await setupNotifications();
+      
+      // Get local time in the selected timezone for display
+      const currentTime = dayjs().tz(selectedTimezone).format('HH:mm');
+      
+      // Send confirmation
+      await interaction.update({
+        content: `✅ โซนเวลาของคุณถูกตั้งเป็น **${selectedTimezone}** เรียบร้อยแล้ว\nเวลาปัจจุบันในโซนเวลาของคุณคือ **${currentTime}**`,
+        embeds: [],
+        components: []
+      });
+      
+      setTimeout(async () => {
+        try {
+          // Try to delete the message after a delay
+          const message = await interaction.channel.messages.fetch(interaction.message.id);
+          if (message && message.deletable) {
+            await message.delete();
+          }
+        } catch (err) {
+          console.error(`Error deleting timezone message: ${err}`);
+        }
+      }, 10000); // Delete after 10 seconds
+      
+    } catch (err) {
+      console.error(`Error updating timezone: ${err}`);
+      await interaction.reply({
+        content: '❌ เกิดข้อผิดพลาดในการตั้งค่าโซนเวลา โปรดลองใหม่อีกครั้ง',
+        ephemeral: true
+      });
+    }
+  }
+  
   // Handle button interactions for auto-apply
   if (interaction.isButton()) {
     if (interaction.customId === 'auto_apply_yes' || interaction.customId === 'auto_apply_no') {
@@ -682,6 +850,7 @@ client.on('messageCreate', async message => {
             { name: '`!romc-mvp setup`', value: 'ตั้งค่าหรือแก้ไขเวลาแจ้งเตือน', inline: false },
             { name: '`!romc-mvp edit`', value: 'แก้ไขเวลาแจ้งเตือนที่มีอยู่', inline: false },
             { name: '`!romc-mvp me`', value: 'ดูเวลาการแจ้งเตือนของคุณ', inline: false },
+            { name: '`!romc-mvp timezone`', value: 'ตั้งค่าโซนเวลาของคุณ', inline: false },
             { name: '`!romc-mvp schedule`', value: 'ดูเวลาการเกิด MVP ถัดไป', inline: false },
             { name: '`!romc-mvp stop`', value: 'ยกเลิกการแจ้งเตือนทั้งหมด', inline: false },
             { name: '`!romc-mvp pause`', value: 'หยุดการแจ้งเตือนชั่วคราว', inline: false },
@@ -782,6 +951,34 @@ client.on('messageCreate', async message => {
           await message.reply('❌ เกิดข้อผิดพลาดในการแก้ไขเวลาแจ้งเตือน โปรดลองใหม่อีกครั้ง');
         }
        
+      } else if (command === 'timezone') {
+        try {
+          // Send feedback message first so user knows something is happening
+          const loadingMsg = await message.reply('⌛ กำลังเปิดเมนูตั้งค่าโซนเวลา...');
+          
+          // Send timezone selector
+          const timezoneMsg = await sendTimezoneSelector(message.channel, message.author.id);
+          
+          if (!timezoneMsg) {
+            await loadingMsg.edit('❌ ไม่สามารถเปิดเมนูตั้งค่าโซนเวลาได้ โปรดลองใหม่อีกครั้ง');
+            return;
+          }
+          
+          // Delete the loading message after setup is complete
+          await loadingMsg.delete().catch(err => {
+            console.error(`Error deleting loading message: ${err}`);
+            // Continue execution even if delete fails
+          });
+          
+          // Delete the command message to keep the channel clean
+          await message.delete().catch(err => {
+            console.error(`Error deleting command message: ${err}`);
+            // Continue execution even if delete fails
+          });
+        } catch (err) {
+          console.error(`Error in timezone command: ${err}`);
+          await message.reply('❌ เกิดข้อผิดพลาดในการตั้งค่าโซนเวลา โปรดลองใหม่อีกครั้ง');
+        }
       } else if (command === 'test') {
         // Test command only available in test mode
         if (!isTestMode) {
@@ -799,6 +996,15 @@ client.on('messageCreate', async message => {
           await saveUserPreferences(userPrefs);
         }
         
+        // Get server time information for debugging
+        const serverUtcTime = dayjs().utc().format('HH:mm:ss');
+        const serverLocalTime = dayjs().format('HH:mm:ss');
+        const serverTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown';
+        const debugInfo = `**🧪 ข้อมูลเซิร์ฟเวอร์ (โหมดทดสอบ):**\n` +
+          `• เวลา UTC: ${serverUtcTime}\n` +
+          `• เวลาเซิร์ฟเวอร์: ${serverLocalTime}\n` +
+          `• โซนเวลาเซิร์ฟเวอร์: ${serverTimezone}\n\n`;
+        
         const timeArg = args[2];
         
         // If a specific time is provided, test that time
@@ -810,11 +1016,11 @@ client.on('messageCreate', async message => {
           );
           
           if (timeInfo) {
-            await message.reply(`🧪 **โหมดทดสอบ**: กำลังส่งแจ้งเตือนทดสอบสำหรับเวลา ${timeInfo.label}...`);
+            await message.reply(`🧪 **โหมดทดสอบ**: กำลังส่งแจ้งเตือนทดสอบสำหรับเวลา ${timeInfo.label}...\n\n${debugInfo}`);
             await testNotification(userId, timeInfo.value, message.channel);
           } else {
             const availableTimes = NOTIFICATION_TIMES.map(t => `\`${t.value}\` (${t.label})`).join(', ');
-            await message.reply(`❌ เวลาไม่ถูกต้อง กรุณาเลือกจาก: ${availableTimes}`);
+            await message.reply(`❌ เวลาไม่ถูกต้อง กรุณาเลือกจาก: ${availableTimes}\n\n${debugInfo}`);
           }
         } 
         // If no time provided but user has preferences, test their first selected time
@@ -822,12 +1028,12 @@ client.on('messageCreate', async message => {
           const timeValue = userPrefs[userId].times[0];
           const timeInfo = NOTIFICATION_TIMES.find(t => t.value === timeValue);
           
-          await message.reply(`🧪 **โหมดทดสอบ**: กำลังทดสอบแจ้งเตือนสำหรับเวลา (${timeInfo ? timeInfo.label : timeValue})...`);
+          await message.reply(`🧪 **โหมดทดสอบ**: กำลังทดสอบแจ้งเตือนสำหรับเวลา (${timeInfo ? timeInfo.label : timeValue})...\n\n${debugInfo}`);
           await testNotification(userId, timeValue, message.channel);
         }
         // No time provided and user has no preferences
         else {
-          await message.reply(`🧪 **โหมดทดสอบ**: คุณยังไม่มีเวลาที่ตั้งไว้ กำลังทดสอบด้วยเวลาเริ่มต้น 12:00 น.`);
+          await message.reply(`🧪 **โหมดทดสอบ**: คุณยังไม่มีเวลาที่ตั้งไว้ กำลังทดสอบด้วยเวลาเริ่มต้น 12:00 น.\n\n${debugInfo}`);
           await testNotification(userId, '12:00', message.channel);
         }
 
@@ -889,14 +1095,33 @@ client.on('messageCreate', async message => {
           return `• ${timeInfo ? timeInfo.label : timeValue}`;
         }).join('\n');
         
+        // Get user's local time
+        const userTimezone = userSettings.timezone || DEFAULT_TIMEZONE;
+        const currentTime = dayjs().tz(userTimezone).format('HH:mm');
+        
+        // Create description with timezone info
+        let description = `**เวลาที่กำหนดไว้:**\n${timesList}\n\n` +
+          `**ตั้งเป็นค่าเริ่มต้น:** ${userSettings.autoApply ? '✅ เปิดใช้งาน' : '❌ ปิดใช้งาน'}\n` +
+          `**สถานะ:** ${userSettings.paused ? '⏸️ หยุดชั่วคราว' : '▶️ กำลังทำงาน'}\n` +
+          `**โซนเวลา:** ${userTimezone} (เวลาท้องถิ่นของคุณ: ${currentTime})\n\n`;
+        
+        // Add server time information in test mode
+        if (isTestMode) {
+          const serverUtcTime = dayjs().utc().format('HH:mm:ss');
+          const serverLocalTime = dayjs().format('HH:mm:ss');
+          const serverTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown';
+          
+          description += `**🧪 ข้อมูลเซิร์ฟเวอร์ (โหมดทดสอบ):**\n` +
+            `• เวลา UTC: ${serverUtcTime}\n` +
+            `• เวลาเซิร์ฟเวอร์: ${serverLocalTime}\n` +
+            `• โซนเวลาเซิร์ฟเวอร์: ${serverTimezone}\n\n`;
+        }
+        
+        description += `**คุณจะได้รับ:**\n• ⏰ แจ้งเตือนล่วงหน้า 5 นาที`;
+        
         const userEmbed = new EmbedBuilder()
           .setTitle(`🔔 เวลาแจ้งเตือนของ ${message.author.username}`)
-          .setDescription(
-            `**เวลาที่กำหนดไว้:**\n${timesList}\n\n` +
-            `**ตั้งเป็นค่าเริ่มต้น:** ${userSettings.autoApply ? '✅ เปิดใช้งาน' : '❌ ปิดใช้งาน'}\n` +
-            `**สถานะ:** ${userSettings.paused ? '⏸️ หยุดชั่วคราว' : '▶️ กำลังทำงาน'}\n\n` +
-            `**คุณจะได้รับ:**\n• ⏰ แจ้งเตือนล่วงหน้า 5 นาที`
-          )
+          .setDescription(description)
           .setColor('#00FF00')
           .setThumbnail(message.author.displayAvatarURL());
         
@@ -904,9 +1129,15 @@ client.on('messageCreate', async message => {
         
       } else if (command === 'schedule') {
         // Show upcoming MVP times
-        const currentTime = new Date();
-        const currentHour = currentTime.getHours();
-        const currentMinute = currentTime.getMinutes();
+        // Get user's timezone or use default
+        const userPrefs = await loadUserPreferences();
+        const userId = message.author.id;
+        const userTimezone = userPrefs[userId]?.timezone || DEFAULT_TIMEZONE;
+        
+        // Get current time in user's timezone
+        const userLocalTime = dayjs().tz(userTimezone);
+        const tzCurrentHour = userLocalTime.hour();
+        const tzCurrentMinute = userLocalTime.minute();
         
         // Sort times by how soon they'll occur
         const sortedTimes = [...NOTIFICATION_TIMES].sort((a, b) => {
@@ -916,7 +1147,7 @@ client.on('messageCreate', async message => {
           // Convert to minutes since midnight for easier comparison
           let aMinSinceMidnight = aHour * 60 + aMinute;
           let bMinSinceMidnight = bHour * 60 + bMinute;
-          let currentMinSinceMidnight = currentHour * 60 + currentMinute;
+          let currentMinSinceMidnight = tzCurrentHour * 60 + tzCurrentMinute;
           
           // Calculate minutes until each time occurs
           let aMinUntil = aMinSinceMidnight - currentMinSinceMidnight;
@@ -933,7 +1164,7 @@ client.on('messageCreate', async message => {
         const upcomingTimes = sortedTimes.slice(0, 5);
         const timesList = upcomingTimes.map(time => {
           const [hour, minute] = time.value.split(':').map(Number);
-          let timeUntil = (hour * 60 + minute) - (currentHour * 60 + currentMinute);
+          let timeUntil = (hour * 60 + minute) - (tzCurrentHour * 60 + tzCurrentMinute);
           if (timeUntil <= 0) timeUntil += 24 * 60; // If it's tomorrow
           
           const hoursUntil = Math.floor(timeUntil / 60);
@@ -942,9 +1173,26 @@ client.on('messageCreate', async message => {
           return `• ${time.label} (อีก ${hoursUntil} ชม. ${minutesUntil} นาที)`;
         }).join('\n');
         
+        // Create description
+        let description = `**5 เวลาที่ MVP จะเกิดถัดไป:**\n${timesList}\n\n` +
+          `**โซนเวลาของคุณ:** ${userTimezone}\n` + 
+          `**เวลาท้องถิ่นของคุณ:** ${dayjs().tz(userTimezone).format('HH:mm')}`;
+        
+        // Add server time information in test mode
+        if (isTestMode) {
+          const serverUtcTime = dayjs().utc().format('HH:mm:ss');
+          const serverLocalTime = dayjs().format('HH:mm:ss');
+          const serverTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown';
+          
+          description += `\n\n**🧪 ข้อมูลเซิร์ฟเวอร์ (โหมดทดสอบ):**\n` +
+            `• เวลา UTC: ${serverUtcTime}\n` +
+            `• เวลาเซิร์ฟเวอร์: ${serverLocalTime}\n` +
+            `• โซนเวลาเซิร์ฟเวอร์: ${serverTimezone}`;
+        }
+        
         const scheduleEmbed = new EmbedBuilder()
           .setTitle('🕒 เวลาเกิด MVP ที่จะมาถึงเร็วๆ นี้')
-          .setDescription(`**5 เวลาที่ MVP จะเกิดถัดไป:**\n${timesList}`)
+          .setDescription(description)
           .setColor('#5865F2')
           .setFooter({ text: 'ROMC MVP Notification System' });
         
@@ -1080,9 +1328,17 @@ client.on('messageCreate', async message => {
           return `• ${timeInfo ? timeInfo.label : timeValue}`;
         }).join('\n');
         
+        // Get user's timezone
+        const userTimezone = userSettings.timezone || DEFAULT_TIMEZONE;
+        
         const mentionedUserEmbed = new EmbedBuilder()
           .setTitle(`🔔 เวลาแจ้งเตือนของ ${mentionedUser.username}`)
-          .setDescription(`**เวลาที่ตั้งไว้:**\n${timesList}\n\n**ตั้งเป็นค่าเริ่มต้น:** ${userSettings.autoApply ? '✅ เปิดใช้งาน' : '❌ ปิดใช้งาน'}\n**สถานะ:** ${userSettings.paused ? '⏸️ หยุดชั่วคราว' : '▶️ กำลังทำงาน'}`)
+          .setDescription(
+            `**เวลาที่ตั้งไว้:**\n${timesList}\n\n` +
+            `**ตั้งเป็นค่าเริ่มต้น:** ${userSettings.autoApply ? '✅ เปิดใช้งาน' : '❌ ปิดใช้งาน'}\n` +
+            `**สถานะ:** ${userSettings.paused ? '⏸️ หยุดชั่วคราว' : '▶️ กำลังทำงาน'}\n` +
+            `**โซนเวลา:** ${userTimezone}`
+          )
           .setColor('#FFA500')
           .setThumbnail(mentionedUser.displayAvatarURL());
         
@@ -1101,4 +1357,4 @@ client.on('messageCreate', async message => {
 });
 
 // Login to Discord with a check for disabled status
-client.login(process.env.BOT_TOKEN); 
+client.login(process.env.BOT_TOKEN);
