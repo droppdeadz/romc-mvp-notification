@@ -3,6 +3,12 @@ require('dotenv').config();
 // Check if essential environment variables are disabled
 const isBotDisabled = process.env.BOT_TOKEN === 'DISABLED';
 const isChannelDisabled = process.env.NOTIFICATION_CHANNEL_ID === 'DISABLED';
+const isTestMode = process.env.TEST_MODE === 'true' || process.argv.includes('--test');
+
+// Log test mode status
+if (isTestMode) {
+  console.log('🧪 Running bot in TEST MODE - notifications can be triggered manually');
+}
 
 if (isBotDisabled) {
   console.log('Bot is disabled (BOT_TOKEN=DISABLED). Exiting...');
@@ -105,6 +111,26 @@ function initUserPreferences(userId, userPrefs) {
     };
   }
   return userPrefs[userId];
+}
+
+// Function to send a notification to a user
+async function sendNotificationToUser(userId, timeLabel, isEarlyWarning = true) {
+  try {
+    const userPrefs = await loadUserPreferences();
+    
+    // Skip if user has paused notifications
+    if (userPrefs[userId]?.paused) return;
+    
+    const channel = await client.channels.fetch(process.env.NOTIFICATION_CHANNEL_ID);
+    if (channel) {
+      // Always send message to channel with user mention
+      const message = `<@${userId}>\n⏰ **5-minute reminder**: The MVP will born in a few minutes at ${timeLabel}!`;
+      
+      await channel.send(message);
+    }
+  } catch (err) {
+    console.error(`Error sending notification to user ${userId}:`, err);
+  }
 }
 
 // Create notification select menu
@@ -223,11 +249,6 @@ async function sendDailySelector(channel, userId = null) {
 
 // Set up notification schedules
 async function setupNotifications() {
-  if (isChannelDisabled) {
-    console.log('Notifications disabled (NOTIFICATION_CHANNEL_ID=DISABLED). Skipping notification setup...');
-    return;
-  }
-
   try {
     const userPrefs = await loadUserPreferences();
     
@@ -253,50 +274,9 @@ async function setupNotifications() {
       const timeInfo = NOTIFICATION_TIMES.find(t => t.value === timeValue);
       if (!timeInfo) return;
       
-      // Schedule 5-minute early warning
+      // Schedule 5-minute early warning only
       const earlyWarningJob = cron.schedule(timeInfo.earlyWarningCron, async () => {
-        try {
-          // Skip if user has paused notifications
-          if (prefs.paused) return;
-          
-          const channel = await client.channels.fetch(process.env.NOTIFICATION_CHANNEL_ID);
-          if (channel) {
-            const user = await client.users.fetch(userId);
-            if (user) {
-              try {
-                await user.send(`⏰ **5-minute reminder**: Your notification for ${timeInfo.label} is coming up soon!`);
-              } catch (dmErr) {
-                // If DM fails, fall back to channel message that only mentions the user
-                channel.send(`<@${userId}> ⏰ **5-minute reminder**: Your notification for ${timeInfo.label} is coming up soon!`);
-              }
-            }
-          }
-        } catch (err) {
-          console.error(`Error sending early warning to user ${userId}:`, err);
-        }
-      });
-      
-      // Schedule main notification
-      const mainJob = cron.schedule(timeInfo.cronTime, async () => {
-        try {
-          // Skip if user has paused notifications
-          if (prefs.paused) return;
-          
-          const channel = await client.channels.fetch(process.env.NOTIFICATION_CHANNEL_ID);
-          if (channel) {
-            const user = await client.users.fetch(userId);
-            if (user) {
-              try {
-                await user.send(`🔔 **Time's up!** This is your notification for ${timeInfo.label}`);
-              } catch (dmErr) {
-                // If DM fails, fall back to channel message that only mentions the user
-                channel.send(`<@${userId}> 🔔 **Time's up!** This is your notification for ${timeInfo.label}`);
-              }
-            }
-          }
-        } catch (err) {
-          console.error(`Error sending notification to user ${userId}:`, err);
-        }
+        await sendNotificationToUser(userId, timeInfo.label, true);
       });
       
       // If notifications are paused, stop the job immediately
@@ -304,22 +284,13 @@ async function setupNotifications() {
         if (earlyWarningJob && typeof earlyWarningJob.stop === 'function') {
           earlyWarningJob.stop();
         }
-        if (mainJob && typeof mainJob.stop === 'function') {
-          mainJob.stop();
-        }
       }
       
-      // Store job IDs for future reference
+      // Store job ID for future reference
       if (earlyWarningJob) {
         const earlyJobId = `${userId}_${timeValue}_early`;
         prefs.scheduledJobs.push(earlyJobId);
         activeJobs[earlyJobId] = earlyWarningJob;
-      }
-      
-      if (mainJob) {
-        const mainJobId = `${userId}_${timeValue}_main`;
-        prefs.scheduledJobs.push(mainJobId);
-        activeJobs[mainJobId] = mainJob;
       }
     });
   });
@@ -328,6 +299,34 @@ async function setupNotifications() {
   await saveUserPreferences(userPrefs);
   } catch (err) {
     console.error('Error setting up notifications:', err);
+  }
+}
+
+// Test notification function
+async function testNotification(userId, timeValue, channel) {
+  try {
+    const timeInfo = NOTIFICATION_TIMES.find(t => t.value === timeValue);
+    if (!timeInfo) {
+      // If no specific time was provided, use the current time
+      const now = new Date();
+      const hours = now.getHours();
+      const minutes = now.getMinutes();
+      const formattedHours = hours < 10 ? `0${hours}` : hours;
+      const formattedMinutes = minutes < 10 ? `0${minutes}` : minutes;
+      const currentTime = `${formattedHours}:${formattedMinutes}`;
+      
+      await channel.send(`❌ Invalid time value: ${timeValue}. Please provide a valid notification time.`);
+      return false;
+    }
+
+    // Send early warning notification
+    await sendNotificationToUser(userId, timeInfo.label, true);
+    
+    return true;
+  } catch (err) {
+    console.error('Error testing notification:', err);
+    await channel.send(`❌ An error occurred while testing notifications: ${err.message}`);
+    return false;
   }
 }
 
@@ -352,6 +351,20 @@ function scheduleDailyMessage() {
       console.error('Error sending daily selector:', err);
     }
   });
+
+  // In test mode, also show a notification that daily messages are scheduled
+  if (isTestMode) {
+    setTimeout(async () => {
+      try {
+        const channel = await client.channels.fetch(process.env.NOTIFICATION_CHANNEL_ID);
+        if (channel) {
+          await channel.send('🧪 **TEST MODE**: Daily selector is scheduled for 8:00 AM. Use `!romc-mvp test` to test notifications immediately.');
+        }
+      } catch (err) {
+        console.error('Error sending test mode notification:', err);
+      }
+    }, 3000); // Wait 3 seconds after bot starts
+  }
 }
 
 // Apply saved preferences for users who opted in to auto-apply
@@ -576,7 +589,8 @@ client.on('messageCreate', async message => {
             { name: '`!romc-mvp stop`', value: 'Clear times and stop all notifications', inline: false },
             { name: '`!romc-mvp pause`', value: 'Temporarily disable notifications', inline: false },
             { name: '`!romc-mvp resume`', value: 'Re-enable paused notifications', inline: false },
-            { name: '`!romc-mvp @user`', value: 'Show notification times for mentioned user', inline: false }
+            { name: '`!romc-mvp @user`', value: 'Show notification times for mentioned user', inline: false },
+            ...(isTestMode ? [{ name: '`!romc-mvp test [time]`', value: 'Test notifications (TEST MODE only)', inline: false }] : [])
           )
           .setColor('#5865F2')
           .setFooter({ text: 'ROMC MVP Notification System' });
@@ -594,6 +608,79 @@ client.on('messageCreate', async message => {
         
         // Delete the command message to keep the channel clean
         await message.delete().catch(err => console.error(`Error deleting command message: ${err}`));
+        
+      } else if (command === 'test') {
+        // Test command only available in test mode
+        if (!isTestMode) {
+          await message.reply('❌ Test mode is not enabled. Run the bot with `TEST_MODE=true` or `--test` flag to enable test mode.');
+          return;
+        }
+
+        // Get user preferences
+        const userPrefs = await loadUserPreferences();
+        const userId = message.author.id;
+        
+        // Initialize user if they don't exist yet
+        if (!userPrefs[userId]) {
+          userPrefs[userId] = initUserPreferences(userId, userPrefs);
+          await saveUserPreferences(userPrefs);
+        }
+        
+        const timeArg = args[2];
+        
+        // If a specific time is provided, test that time
+        if (timeArg) {
+          const timeInfo = NOTIFICATION_TIMES.find(t => 
+            t.value === timeArg || 
+            t.label.toLowerCase() === timeArg.toLowerCase() ||
+            t.label.toLowerCase().replace(' ', '') === timeArg.toLowerCase()
+          );
+          
+          if (timeInfo) {
+            await message.reply(`🧪 **TEST MODE**: Testing notifications for ${timeInfo.label}...`);
+            await testNotification(userId, timeInfo.value, message.channel);
+          } else {
+            const availableTimes = NOTIFICATION_TIMES.map(t => `\`${t.value}\` (${t.label})`).join(', ');
+            await message.reply(`❌ Invalid time format. Available times: ${availableTimes}`);
+          }
+        } 
+        // If no time provided but user has preferences, test their first selected time
+        else if (userPrefs[userId]?.times?.length > 0) {
+          const timeValue = userPrefs[userId].times[0];
+          const timeInfo = NOTIFICATION_TIMES.find(t => t.value === timeValue);
+          
+          await message.reply(`🧪 **TEST MODE**: Testing notifications for your selected time (${timeInfo ? timeInfo.label : timeValue})...`);
+          await testNotification(userId, timeValue, message.channel);
+        }
+        // No time provided and user has no preferences
+        else {
+          await message.reply(`🧪 **TEST MODE**: You have no notification times set. Testing with default time (12:00 PM)...`);
+          await testNotification(userId, '12:00', message.channel);
+        }
+
+      } else if (command === 'testall') {
+        // Test all command only available in test mode and for admins
+        if (!isTestMode) {
+          await message.reply('❌ Test mode is not enabled. Run the bot with `TEST_MODE=true` or `--test` flag to enable test mode.');
+          return;
+        }
+
+        // Check if user has admin permissions
+        if (!message.member.permissions.has('ADMINISTRATOR')) {
+          await message.reply('❌ You need administrator permissions to test all notification times.');
+          return;
+        }
+
+        const userId = message.author.id;
+        await message.reply('🧪 **TEST MODE**: Testing all notification times (early warnings disabled)...');
+        
+        // Test each notification time with a delay between them
+        for (const timeInfo of NOTIFICATION_TIMES) {
+          await testNotification(userId, timeInfo.value, message.channel, false);
+          await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay between notifications
+        }
+        
+        await message.reply('✅ All notification tests completed!');
         
       } else if (command === 'me') {
         // Show current user's notification times
