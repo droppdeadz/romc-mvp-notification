@@ -34,22 +34,22 @@ const activeJobs = {};
 
 // Define notification times from the image
 const NOTIFICATION_TIMES = [
-  { label: '10:30 AM', value: '10:30', cronTime: '30 10 * * *', earlyWarningCron: '25 10 * * *' },
-  { label: '12:00 PM', value: '12:00', cronTime: '0 12 * * *', earlyWarningCron: '55 11 * * *' },
-  { label: '1:30 PM', value: '13:30', cronTime: '30 13 * * *', earlyWarningCron: '25 13 * * *' },
-  { label: '3:00 PM', value: '15:00', cronTime: '0 15 * * *', earlyWarningCron: '55 14 * * *' },
-  { label: '4:30 PM', value: '16:30', cronTime: '30 16 * * *', earlyWarningCron: '25 16 * * *' },
-  { label: '6:00 PM', value: '18:00', cronTime: '0 18 * * *', earlyWarningCron: '55 17 * * *' },
-  { label: '7:30 PM', value: '19:30', cronTime: '30 19 * * *', earlyWarningCron: '25 19 * * *' },
-  { label: '9:00 PM', value: '21:00', cronTime: '0 21 * * *', earlyWarningCron: '55 20 * * *' },
-  { label: '10:30 PM', value: '22:30', cronTime: '30 22 * * *', earlyWarningCron: '25 22 * * *' },
-  { label: '12:00 AM', value: '00:00', cronTime: '0 0 * * *', earlyWarningCron: '55 23 * * *' },
-  { label: '1:30 AM', value: '01:30', cronTime: '30 1 * * *', earlyWarningCron: '25 1 * * *' },
-  { label: '3:00 AM', value: '03:00', cronTime: '0 3 * * *', earlyWarningCron: '55 2 * * *' },
-  { label: '4:30 AM', value: '04:30', cronTime: '30 4 * * *', earlyWarningCron: '25 4 * * *' },
-  { label: '6:00 AM', value: '06:00', cronTime: '0 6 * * *', earlyWarningCron: '55 5 * * *' },
-  { label: '7:30 AM', value: '07:30', cronTime: '30 7 * * *', earlyWarningCron: '25 7 * * *' },
-  { label: '9:00 AM', value: '09:00', cronTime: '0 9 * * *', earlyWarningCron: '55 8 * * *' }
+  { label: '10:30 น.', value: '10:30', cronTime: '30 10 * * *', earlyWarningCron: '25 10 * * *' },
+  { label: '12:00 น.', value: '12:00', cronTime: '0 12 * * *', earlyWarningCron: '55 11 * * *' },
+  { label: '13:30 น.', value: '13:30', cronTime: '30 13 * * *', earlyWarningCron: '25 13 * * *' },
+  { label: '15:00 น.', value: '15:00', cronTime: '0 15 * * *', earlyWarningCron: '55 14 * * *' },
+  { label: '16:30 น.', value: '16:30', cronTime: '30 16 * * *', earlyWarningCron: '25 16 * * *' },
+  { label: '18:00 น.', value: '18:00', cronTime: '0 18 * * *', earlyWarningCron: '55 17 * * *' },
+  { label: '19:30 น.', value: '19:30', cronTime: '30 19 * * *', earlyWarningCron: '25 19 * * *' },
+  { label: '21:00 น.', value: '21:00', cronTime: '0 21 * * *', earlyWarningCron: '55 20 * * *' },
+  { label: '22:30 น.', value: '22:30', cronTime: '30 22 * * *', earlyWarningCron: '25 22 * * *' },
+  { label: '00:00 น.', value: '00:00', cronTime: '0 0 * * *', earlyWarningCron: '55 23 * * *' },
+  { label: '01:30 น.', value: '01:30', cronTime: '30 1 * * *', earlyWarningCron: '25 1 * * *' },
+  { label: '03:00 น.', value: '03:00', cronTime: '0 3 * * *', earlyWarningCron: '55 2 * * *' },
+  { label: '04:30 น.', value: '04:30', cronTime: '30 4 * * *', earlyWarningCron: '25 4 * * *' },
+  { label: '06:00 น.', value: '06:00', cronTime: '0 6 * * *', earlyWarningCron: '55 5 * * *' },
+  { label: '07:30 น.', value: '07:30', cronTime: '30 7 * * *', earlyWarningCron: '25 7 * * *' },
+  { label: '09:00 น.', value: '09:00', cronTime: '0 9 * * *', earlyWarningCron: '55 8 * * *' }
 ];
 
 // Initialize Discord client
@@ -144,12 +144,15 @@ function createNotificationMenu(selectedTimes = [], autoApply = false) {
           : 'เลือกเวลาการแจ้งเตือน')
         .setMinValues(0)
         .setMaxValues(NOTIFICATION_TIMES.length)
-        .addOptions(NOTIFICATION_TIMES.map(time => ({
-          label: time.label,
-          value: time.value,
-          description: `รับแจ้งเตือนในเวลา ${time.label}`,
-          default: selectedTimes.includes(time.value)
-        })))
+        .addOptions(NOTIFICATION_TIMES.map(time => {
+          const isSelected = selectedTimes.includes(time.value);
+          return {
+            label: isSelected ? `✓ ${time.label}` : time.label,
+            value: time.value,
+            description: `รับแจ้งเตือนในเวลา ${time.label}`,
+            default: isSelected
+          };
+        }))
     );
   
   const autoApplyRow = new ActionRowBuilder()
@@ -168,7 +171,7 @@ function createNotificationMenu(selectedTimes = [], autoApply = false) {
 }
 
 // Send daily notification selector
-async function sendDailySelector(channel, userId = null) {
+async function sendDailySelector(channel, userId = null, isEditing = false) {
   try {
     // Default to empty selection
     let selectedTimes = [];
@@ -186,22 +189,34 @@ async function sendDailySelector(channel, userId = null) {
         selectedTimes = userPrefs[userId].times;
         autoApply = userPrefs[userId].autoApply;
       }
+      // console.log(userPrefs[userId], userPrefs[userId].lastSetupMessageId);
       
       // Check for previous setup message and delete it
       if (userPrefs[userId].lastSetupMessageId) {
         try {
-          const previousMessage = await channel.messages.fetch(userPrefs[userId].lastSetupMessageId);
-          if (previousMessage) {
-            await previousMessage.delete().catch(err => console.error(`Error deleting previous setup message: ${err}`));
+          const previousMessage = await channel.messages.fetch(userPrefs[userId].lastSetupMessageId)
+            .catch(err => {
+              console.log(`Could not fetch previous setup message: ${err.message}`);
+              return null;
+            });
+          
+          if (previousMessage && previousMessage.deletable) {
+            await previousMessage.delete().catch(err => {
+              console.log(`Could not delete previous setup message: ${err.message}`);
+              // Continue execution even if delete fails
+            });
           }
         } catch (err) {
           // Message might not exist anymore, just continue
-          console.log(`Could not find previous setup message to delete: ${err}`);
+          console.log(`Error handling previous setup message: ${err.message}`);
+          // Don't stop execution due to this error
         }
       }
     }
     
-    let embedDescription = 'กรุณาเลือกเวลาที่คุณต้องการรับการแจ้งเตือนสำหรับ MVP\n\n';
+    let embedDescription = isEditing 
+      ? 'แก้ไขเวลาแจ้งเตือน MVP ด้านล่าง ✓ คือเวลาที่เลือกไว้แล้ว\n\n'
+      : 'กรุณาเลือกเวลาที่คุณต้องการรับการแจ้งเตือนสำหรับ MVP\n\n';
     
     if (selectedTimes.length > 0) {
       const timeLabels = selectedTimes.map(timeValue => {
@@ -222,21 +237,34 @@ async function sendDailySelector(channel, userId = null) {
     embedDescription += 'คุณสามารถเลือกบันทึกเวลาเหล่านี้เป็นค่าตั้งต้น หรือใช้สำหรับวันนี้เท่านั้น\n\nการตั้งค่าของคุณจะเป็นแบบส่วนตัว และการแจ้งเตือนจะถูกส่งเฉพาะถึงคุณ';
     
     const embed = new EmbedBuilder()
-      .setTitle('🔔 ตั้งเวลาแจ้งเตือน MVP - ROMC')
+      .setTitle(isEditing ? '🔄 แก้ไขเวลาแจ้งเตือน MVP - ROMC' : '🔔 ตั้งเวลาแจ้งเตือน MVP - ROMC')
       .setDescription(embedDescription)
       .setColor('#5865F2');
 
     const sentMessage = await channel.send({
       embeds: [embed],
       components: createNotificationMenu(selectedTimes, autoApply)
+    }).catch(err => {
+      console.error(`Error sending selector message: ${err}`);
+      return null;
     });
+    
+    if (!sentMessage) {
+      console.error(`Failed to send setup message for user ${userId}`);
+      return null;
+    }
     
     // If userId is provided, update the user's lastSetupMessageId
     if (userId) {
-      const userPrefs = await loadUserPreferences();
-      if (userPrefs[userId]) {
-        userPrefs[userId].lastSetupMessageId = sentMessage.id;
-        await saveUserPreferences(userPrefs);
+      try {
+        const userPrefs = await loadUserPreferences();
+        if (userPrefs[userId]) {
+          userPrefs[userId].lastSetupMessageId = sentMessage.id;
+          await saveUserPreferences(userPrefs);
+        }
+      } catch (err) {
+        console.error(`Error updating user preferences with new setup message ID: ${err}`);
+        // Continue execution even if this fails
       }
     }
     
@@ -428,6 +456,11 @@ client.on('interactionCreate', async interaction => {
     // Load current preferences
     const userPrefs = await loadUserPreferences();
     
+    // Check what changed from previous selections
+    const previousTimes = userPrefs[userId]?.times || [];
+    const added = selectedTimes.filter(time => !previousTimes.includes(time));
+    const removed = previousTimes.filter(time => !selectedTimes.includes(time));
+    
     // Update user's selected times
     if (!userPrefs[userId]) {
       userPrefs[userId] = initUserPreferences(userId, userPrefs);
@@ -446,12 +479,14 @@ client.on('interactionCreate', async interaction => {
       .addComponents(
         new StringSelectMenuBuilder()
           .setCustomId('notification_times_disabled')
-          .setPlaceholder(`✅ Selected: ${selectedTimes.length} time(s)`)
+          .setPlaceholder(selectedTimes.length > 0 
+            ? `✅ เลือก ${selectedTimes.length} เวลาเรียบร้อยแล้ว` 
+            : 'ยังไม่ได้เลือกเวลาแจ้งเตือน')
           .setDisabled(true)
           .addOptions([{
-            label: 'Selection completed',
+            label: 'การเลือกเสร็จสิ้น',
             value: 'completed',
-            description: 'You have made your selection'
+            description: 'คุณได้เลือกเวลาแจ้งเตือนแล้ว'
           }])
       );
     
@@ -480,6 +515,23 @@ client.on('interactionCreate', async interaction => {
       components: [disabledRow, autoApplyRow]
     });
     
+    // Build a more detailed feedback message
+    let timeChangeInfo = '';
+    if (added.length > 0) {
+      const addedLabels = added.map(timeVal => {
+        const time = NOTIFICATION_TIMES.find(t => t.value === timeVal);
+        return time ? time.label : timeVal;
+      }).join(', ');
+      timeChangeInfo += `เพิ่มเวลา: ${addedLabels}\n`;
+    }
+    if (removed.length > 0) {
+      const removedLabels = removed.map(timeVal => {
+        const time = NOTIFICATION_TIMES.find(t => t.value === timeVal);
+        return time ? time.label : timeVal;
+      }).join(', ');
+      timeChangeInfo += `ลบเวลา: ${removedLabels}\n`;
+    }
+
     // Send a detailed selection confirmation as ephemeral message to the user
     const timesList = selectedTimes.map(t => {
       const time = NOTIFICATION_TIMES.find(nt => nt.value === t);
@@ -488,7 +540,11 @@ client.on('interactionCreate', async interaction => {
     
     const userConfirmationEmbed = new EmbedBuilder()
       .setTitle(`🔔 เวลาแจ้งเตือนของคุณ`)
-      .setDescription(`**เวลาที่คุณเลือก:**\n${timesList}\n\n**คุณจะได้รับ:**\n• ⏰ แจ้งเตือนล่วงหน้า 5 นาที\n\nเลือกระหว่าง "บันทึกเป็นเวลาเริ่มต้น" หรือ "เฉพาะครั้งนี้" ในช่องที่คุณส่งข้อความ`)
+      .setDescription(
+        `**เวลาที่คุณเลือก:**\n${timesList}\n\n` +
+        (timeChangeInfo ? `**การเปลี่ยนแปลง:**\n${timeChangeInfo}\n` : '') +
+        `**คุณจะได้รับ:**\n• ⏰ แจ้งเตือนล่วงหน้า 5 นาที\n\nเลือกระหว่าง "บันทึกเป็นเวลาเริ่มต้น" หรือ "เฉพาะครั้งนี้" ในช่องที่คุณส่งข้อความ`
+      )
       .setColor('#00FF00')
       .setFooter({ text: 'ROMC MVP Notification System' });
     
@@ -547,8 +603,8 @@ client.on('interactionCreate', async interaction => {
       
       await interaction.reply({ 
         content: autoApply 
-          ? 'Your notification settings have been saved as your default times. They will be automatically applied each day.' 
-          : 'Your notification settings will only apply for today and will be reset tomorrow.',
+          ? '✅ บันทึกการตั้งค่าของคุณเป็นค่าเริ่มต้นเรียบร้อยแล้ว ระบบจะใช้เวลาเหล่านี้ในการแจ้งเตือนทุกวัน' 
+          : '✅ บันทึกการตั้งค่าของคุณสำหรับวันนี้เรียบร้อยแล้ว การตั้งค่าจะถูกรีเซ็ตในวันพรุ่งนี้',
         ephemeral: true 
       });
       
@@ -562,6 +618,46 @@ client.on('interactionCreate', async interaction => {
           console.error(`Error deleting message after selection: ${err}`);
         }
       }, 5000); // Delete after 5 seconds
+    } else if (interaction.customId === 'setup_now') {
+      try {
+        // Send feedback message first so user knows something is happening
+        await interaction.reply({
+          content: '⌛ กำลังเปิดเมนูตั้งค่าเวลาแจ้งเตือน...',
+          ephemeral: true
+        });
+        
+        // Send notification selection menu
+        const setupMsg = await sendDailySelector(interaction.channel, interaction.user.id, false);
+        
+        if (!setupMsg) {
+          await interaction.editReply({
+            content: '❌ ไม่สามารถตั้งค่าเมนูแจ้งเตือนได้ โปรดลองใหม่อีกครั้ง',
+            ephemeral: true
+          });
+          return;
+        }
+        
+        // Update the reply with success message
+        await interaction.editReply({
+          content: '✅ เปิดเมนูตั้งค่าแล้ว กรุณาเลือกเวลาที่ต้องการรับการแจ้งเตือน',
+          ephemeral: true
+        });
+        
+        // Try to delete original message
+        try {
+          if (interaction.message && interaction.message.deletable) {
+            await interaction.message.delete();
+          }
+        } catch (err) {
+          console.error(`Error deleting message after button click: ${err}`);
+        }
+      } catch (err) {
+        console.error(`Error handling setup_now button: ${err}`);
+        await interaction.editReply({
+          content: '❌ เกิดข้อผิดพลาด โปรดลองใหม่อีกครั้ง',
+          ephemeral: true
+        });
+      }
     }
   }
 });
@@ -583,7 +679,8 @@ client.on('messageCreate', async message => {
           .setDescription('รายการคำสั่งที่สามารถใช้งานได้:')
           .addFields(
             { name: '`!romc-mvp`', value: 'แสดงคำแนะนำการใช้งาน', inline: false },
-            { name: '`!romc-mvp setup`', value: 'ตั้งค่าเวลาแจ้งเตือน', inline: false },
+            { name: '`!romc-mvp setup`', value: 'ตั้งค่าหรือแก้ไขเวลาแจ้งเตือน', inline: false },
+            { name: '`!romc-mvp edit`', value: 'แก้ไขเวลาแจ้งเตือนที่มีอยู่', inline: false },
             { name: '`!romc-mvp me`', value: 'ดูเวลาการแจ้งเตือนของคุณ', inline: false },
             { name: '`!romc-mvp schedule`', value: 'ดูเวลาการเกิด MVP ถัดไป', inline: false },
             { name: '`!romc-mvp stop`', value: 'ยกเลิกการแจ้งเตือนทั้งหมด', inline: false },
@@ -597,17 +694,94 @@ client.on('messageCreate', async message => {
         await message.reply({ embeds: [helpEmbed] });
         
       } else if (command === 'setup' || command === 'setting') {
-        if (isChannelDisabled) {
-          await message.reply('❌ Notification service is currently disabled by the administrator.');
-          return;
+        try {
+          // Check if user already has preferences
+          const userPrefs = await loadUserPreferences();
+          const userId = message.author.id;
+          const userExists = userPrefs[userId] && userPrefs[userId].times && userPrefs[userId].times.length > 0;
+          
+          // Send different loading message based on whether user exists
+          const loadingMsg = await message.reply(
+            userExists 
+              ? '⌛ กำลังเปิดเมนูแก้ไขเวลาแจ้งเตือนของคุณ...' 
+              : '⌛ กำลังตั้งค่าเมนูแจ้งเตือน...'
+          );
+
+          // Send notification selection menu with isEditing flag if user exists
+          const setupMsg = await sendDailySelector(message.channel, message.author.id, userExists);
+          
+          if (!setupMsg) {
+            await loadingMsg.edit('❌ ไม่สามารถตั้งค่าเมนูแจ้งเตือนได้ โปรดลองใหม่อีกครั้ง');
+            return;
+          }
+          
+          // Delete the loading message after setup is complete
+          await loadingMsg.delete().catch(err => {
+            console.error(`Error deleting loading message: ${err}`);
+            // Continue execution even if delete fails
+          });
+          
+          // Delete the command message to keep the channel clean
+          await message.delete().catch(err => {
+            console.error(`Error deleting command message: ${err}`);
+            // Continue execution even if delete fails
+          });
+        } catch (err) {
+          console.error(`Error in setup command: ${err}`);
+          await message.reply('❌ เกิดข้อผิดพลาดในการตั้งค่าเมนูแจ้งเตือน โปรดลองใหม่อีกครั้ง');
         }
-        
-        // Send notification selection menu
-        await sendDailySelector(message.channel, message.author.id);
-        
-        // Delete the command message to keep the channel clean
-        await message.delete().catch(err => console.error(`Error deleting command message: ${err}`));
-        
+      
+      } else if (command === 'edit') {
+        try {
+          // Check if user has existing preferences
+          const userPrefs = await loadUserPreferences();
+          const userId = message.author.id;
+          
+          if (!userPrefs[userId] || !userPrefs[userId].times || userPrefs[userId].times.length === 0) {
+            await message.reply('⚠️ คุณยังไม่มีเวลาแจ้งเตือนที่ตั้งไว้ กำลังเปิดเมนูตั้งค่าแทน...');
+            
+            // Open setup menu instead
+            const setupMsg = await sendDailySelector(message.channel, message.author.id);
+            
+            if (!setupMsg) {
+              await message.reply('❌ ไม่สามารถตั้งค่าเมนูแจ้งเตือนได้ โปรดลองใหม่อีกครั้ง');
+            }
+            
+            // Delete the command message to keep the channel clean
+            await message.delete().catch(err => {
+              console.error(`Error deleting command message: ${err}`);
+            });
+            
+            return;
+          }
+          
+          // Send feedback message first so user knows something is happening
+          const loadingMsg = await message.reply('⌛ กำลังเปิดเมนูแก้ไขเวลาแจ้งเตือน...');
+          
+          // Send edit selector with isEditing flag set to true
+          const editMsg = await sendDailySelector(message.channel, message.author.id, true);
+          
+          if (!editMsg) {
+            await loadingMsg.edit('❌ ไม่สามารถเปิดเมนูแก้ไขได้ โปรดลองใหม่อีกครั้ง');
+            return;
+          }
+          
+          // Delete the loading message after setup is complete
+          await loadingMsg.delete().catch(err => {
+            console.error(`Error deleting loading message: ${err}`);
+            // Continue execution even if delete fails
+          });
+          
+          // Delete the command message to keep the channel clean
+          await message.delete().catch(err => {
+            console.error(`Error deleting command message: ${err}`);
+            // Continue execution even if delete fails
+          });
+        } catch (err) {
+          console.error(`Error in edit command: ${err}`);
+          await message.reply('❌ เกิดข้อผิดพลาดในการแก้ไขเวลาแจ้งเตือน โปรดลองใหม่อีกครั้ง');
+        }
+       
       } else if (command === 'test') {
         // Test command only available in test mode
         if (!isTestMode) {
@@ -695,7 +869,18 @@ client.on('messageCreate', async message => {
         const userSettings = userPrefs[userId];
         
         if (!userSettings.times || userSettings.times.length === 0) {
-          await message.reply('❌ คุณยังไม่ได้ตั้งเวลาแจ้งเตือน\nโปรดใช้คำสั่ง `!romc-mvp setup` เพื่อกำหนดเวลา');
+          await message.reply({
+            content: '❌ คุณยังไม่ได้ตั้งเวลาแจ้งเตือน', 
+            components: [
+              new ActionRowBuilder()
+                .addComponents(
+                  new ButtonBuilder()
+                    .setCustomId('setup_now')
+                    .setLabel('ตั้งค่าตอนนี้')
+                    .setStyle(ButtonStyle.Success)
+                )
+            ]
+          });
           return;
         }
         
@@ -885,7 +1070,7 @@ client.on('messageCreate', async message => {
         const userPrefs = await loadUserPreferences();
         const userSettings = userPrefs[mentionedUser.id];
         
-        if (!userSettings || !userSettings.times || userSettings.times.length === 0) {
+        if (!userSettings || !userSettings.times || !userSettings.times.length) {
           await message.reply(`❌ ${mentionedUser.username} ไม่มีเวลาแจ้งเตือนที่ตั้งไว้`);
           return;
         }
