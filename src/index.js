@@ -80,14 +80,23 @@ const COMMON_TIMEZONES = [
 // Function to convert cron time to a specific timezone
 function convertCronToTimezone(cronExpression, timezone) {
   // If no timezone specified, use default
-  if (!timezone) return cronExpression;
+  if (!timezone) {
+    console.log(`⚠️ No timezone specified, using original cron: ${cronExpression}`);
+    return cronExpression;
+  }
   
   // Parse the cron expression
   const parts = cronExpression.split(' ');
-  if (parts.length !== 5) return cronExpression; // Invalid cron expression
+  if (parts.length !== 5) {
+    console.log(`❌ Invalid cron expression: ${cronExpression}`);
+    return cronExpression; // Invalid cron expression
+  }
   
   const minute = parseInt(parts[0], 10);
   const hour = parseInt(parts[1], 10);
+  
+  console.log(`🔄 Converting cron from ${DEFAULT_TIMEZONE} to ${timezone}:`);
+  console.log(`   Original: ${cronExpression} (${hour}:${minute.toString().padStart(2, '0')})`);
   
   // The NOTIFICATION_TIMES are defined in Bangkok time (Asia/Bangkok)
   // Create a dayjs object for today at the specified hour/minute in Bangkok timezone
@@ -97,7 +106,11 @@ function convertCronToTimezone(cronExpression, timezone) {
   const targetTime = localTime.tz(timezone);
   
   // Return new cron expression with adjusted hour/minute
-  return `${targetTime.minute()} ${targetTime.hour()} ${parts[2]} ${parts[3]} ${parts[4]}`;
+  const convertedCron = `${targetTime.minute()} ${targetTime.hour()} ${parts[2]} ${parts[3]} ${parts[4]}`;
+  console.log(`   Converted: ${convertedCron} (${targetTime.hour()}:${targetTime.minute().toString().padStart(2, '0')})`);
+  console.log(`   Bangkok time: ${localTime.format('HH:mm')}, ${timezone} time: ${targetTime.format('HH:mm')}`);
+  
+  return convertedCron;
 }
 
 // Initialize Discord client
@@ -166,13 +179,21 @@ function initUserPreferences(userId, userPrefs) {
 // Function to send a notification to a user
 async function sendNotificationToUser(userId, timeLabel) {
   try {
+    console.log(`📤 Attempting to send notification to user ${userId} for ${timeLabel}`);
+    
     const userPrefs = await loadUserPreferences();
     
     // Skip if user has paused notifications
-    if (userPrefs[userId]?.paused) return;
+    if (userPrefs[userId]?.paused) {
+      console.log(`⏸️ Skipping notification for user ${userId} - notifications are paused`);
+      return;
+    }
     
+    console.log(`🔍 Fetching channel ${process.env.NOTIFICATION_CHANNEL_ID}`);
     const channel = await client.channels.fetch(process.env.NOTIFICATION_CHANNEL_ID);
     if (channel) {
+      console.log(`✅ Channel found: ${channel.name} (${channel.id})`);
+      
       // Get user's timezone for display
       const userTimezone = userPrefs[userId]?.timezone || DEFAULT_TIMEZONE;
       const currentTime = dayjs().tz(userTimezone).format('HH:mm');
@@ -194,10 +215,20 @@ async function sendNotificationToUser(userId, timeLabel) {
       // Always send message to channel with user mention
       const message = `<@${userId}>\n⏰ **แจ้งเตือนล่วงหน้า 5 นาที**: MVP กำลังจะเกิดในเวลา ${mvpTimeInUserTz}! อย่าลืมเตรียมตัวให้พร้อมนะ!\n(เวลาท้องถิ่นของคุณ: ${currentTime} - ${userTimezone})`;
       
-      await channel.send(message);
+      console.log(`📝 Sending message: ${message.substring(0, 100)}...`);
+      const sentMessage = await channel.send(message);
+      console.log(`✅ Notification sent successfully! Message ID: ${sentMessage.id}`);
+    } else {
+      console.error(`❌ Channel not found: ${process.env.NOTIFICATION_CHANNEL_ID}`);
     }
   } catch (err) {
-    console.error(`Error sending notification to user ${userId}:`, err);
+    console.error(`❌ Error sending notification to user ${userId}:`, err);
+    console.error(`   Error details:`, {
+      name: err.name,
+      message: err.message,
+      code: err.code,
+      stack: err.stack?.split('\n').slice(0, 3).join('\n')
+    });
   }
 }
 
@@ -428,9 +459,25 @@ async function setupNotifications() {
   try {
     const userPrefs = await loadUserPreferences();
     
+    console.log('🔧 Setting up notifications...');
+    console.log(`📊 Server timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}`);
+    console.log(`🕐 Server UTC time: ${dayjs().utc().format('YYYY-MM-DD HH:mm:ss')}`);
+    console.log(`🕐 Server local time: ${dayjs().format('YYYY-MM-DD HH:mm:ss')}`);
+    console.log(`👥 Total users in preferences: ${Object.keys(userPrefs).length}`);
+    
+    let totalScheduledJobs = 0;
+    
     // Schedule notifications for each user and their selected times
     Object.entries(userPrefs).forEach(([userId, prefs]) => {
-    if (!prefs.times || !prefs.times.length) return;
+    if (!prefs.times || !prefs.times.length) {
+      console.log(`⏭️ Skipping user ${userId} - no notification times set`);
+      return;
+    }
+    
+    console.log(`👤 Setting up notifications for user ${userId}:`);
+    console.log(`   📅 Selected times: ${prefs.times.join(', ')}`);
+    console.log(`   🌐 User timezone: ${prefs.timezone || DEFAULT_TIMEZONE}`);
+    console.log(`   ⏸️ Paused: ${prefs.paused}`);
     
     // Clear existing schedules if any
     if (prefs.scheduledJobs) {
@@ -439,6 +486,7 @@ async function setupNotifications() {
         if (job && typeof job.cancel === 'function') {
           job.cancel();
           delete activeJobs[jobId];
+          console.log(`   🗑️ Cancelled existing job: ${jobId}`);
         }
       });
     }
@@ -451,21 +499,40 @@ async function setupNotifications() {
     // Schedule new notifications
     prefs.times.forEach(timeValue => {
       const timeInfo = NOTIFICATION_TIMES.find(t => t.value === timeValue);
-      if (!timeInfo) return;
+      if (!timeInfo) {
+        console.log(`   ❌ Time info not found for: ${timeValue}`);
+        return;
+      }
       
       // Convert cron expressions to user's timezone
+      const originalCron = timeInfo.earlyWarningCron;
       const earlyWarningCronInTz = convertCronToTimezone(timeInfo.earlyWarningCron, userTimezone);
+      
+      console.log(`   ⏰ Setting up notification for ${timeInfo.label}:`);
+      console.log(`      Original cron (Bangkok): ${originalCron}`);
+      console.log(`      Converted cron (${userTimezone}): ${earlyWarningCronInTz}`);
       
       // Schedule 5-minute early warning only
       const earlyWarningJob = cron.schedule(earlyWarningCronInTz, async () => {
+        console.log(`🔔 Triggering notification for user ${userId} at ${timeInfo.label}`);
+        console.log(`   🕐 Current server time: ${dayjs().format('YYYY-MM-DD HH:mm:ss')}`);
+        console.log(`   🌐 User timezone: ${userTimezone}`);
+        console.log(`   🕐 User local time: ${dayjs().tz(userTimezone).format('YYYY-MM-DD HH:mm:ss')}`);
         await sendNotificationToUser(userId, timeInfo.label);
+      }, {
+        scheduled: true,
+        timezone: 'UTC' // Force UTC to avoid server timezone issues
       });
       
       // If notifications are paused, stop the job immediately
       if (prefs.paused) {
         if (earlyWarningJob && typeof earlyWarningJob.stop === 'function') {
           earlyWarningJob.stop();
+          console.log(`   ⏸️ Job paused for ${timeInfo.label}`);
         }
+      } else {
+        console.log(`   ✅ Job scheduled for ${timeInfo.label}`);
+        totalScheduledJobs++;
       }
       
       // Store job ID for future reference
@@ -476,6 +543,9 @@ async function setupNotifications() {
       }
     });
   });
+  
+  console.log(`✅ Notification setup complete. Total active jobs: ${totalScheduledJobs}`);
+  console.log(`📋 Active job IDs: ${Object.keys(activeJobs).join(', ')}`);
   
   // Save updated preferences
   await saveUserPreferences(userPrefs);
@@ -1710,6 +1780,66 @@ client.on('messageCreate', async message => {
           await message.reply('❌ คำสั่ง admin ไม่ถูกต้อง\nใช้: `!romc-mvp admin list`, `!romc-mvp admin remove @user`, หรือ `!romc-mvp admin clear`');
         }
         
+      } else if (command === 'debug') {
+        // Debug command to show server and job status
+        if (!message.member?.permissions?.has('Administrator')) {
+          await message.reply('❌ คำสั่งนี้ต้องการสิทธิ์ผู้ดูแลระบบเท่านั้น');
+          return;
+        }
+        
+        try {
+          const userPrefs = await loadUserPreferences();
+          const serverTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+          const serverUtcTime = dayjs().utc().format('YYYY-MM-DD HH:mm:ss');
+          const serverLocalTime = dayjs().format('YYYY-MM-DD HH:mm:ss');
+          
+          let description = `**🖥️ Server Information:**\n`;
+          description += `• Server timezone: ${serverTimezone}\n`;
+          description += `• Server UTC time: ${serverUtcTime}\n`;
+          description += `• Server local time: ${serverLocalTime}\n`;
+          description += `• Default timezone: ${DEFAULT_TIMEZONE}\n`;
+          description += `• Test mode: ${isTestMode ? '✅ Enabled' : '❌ Disabled'}\n\n`;
+          
+          description += `**📊 Job Status:**\n`;
+          description += `• Total active jobs: ${Object.keys(activeJobs).length}\n`;
+          description += `• Active job IDs: ${Object.keys(activeJobs).join(', ') || 'None'}\n\n`;
+          
+          description += `**👥 User Status:**\n`;
+          const usersWithNotifications = Object.entries(userPrefs).filter(([userId, prefs]) => 
+            prefs.times && prefs.times.length > 0
+          );
+          description += `• Users with notifications: ${usersWithNotifications.length}\n`;
+          
+          if (usersWithNotifications.length > 0) {
+            description += `\n**📋 User Details:**\n`;
+            for (const [userId, prefs] of usersWithNotifications.slice(0, 5)) { // Show max 5 users
+              try {
+                const user = await client.users.fetch(userId).catch(() => null);
+                const username = user ? user.username : `Unknown (${userId})`;
+                description += `• **${username}**: ${prefs.times.length} times, `;
+                description += `${prefs.timezone || DEFAULT_TIMEZONE}, `;
+                description += `${prefs.paused ? 'Paused' : 'Active'}\n`;
+              } catch (err) {
+                description += `• **Unknown (${userId})**: ${prefs.times.length} times\n`;
+              }
+            }
+            if (usersWithNotifications.length > 5) {
+              description += `• ... and ${usersWithNotifications.length - 5} more users\n`;
+            }
+          }
+          
+          const debugEmbed = new EmbedBuilder()
+            .setTitle('🔧 Debug Information')
+            .setDescription(description)
+            .setColor('#FF6B35')
+            .setFooter({ text: 'ROMC MVP Notification System Debug' });
+          
+          await message.reply({ embeds: [debugEmbed] });
+          
+        } catch (err) {
+          console.error('Error in debug command:', err);
+          await message.reply('❌ เกิดข้อผิดพลาดในการดึงข้อมูล debug');
+        }
       } else {
         // Unknown command
         await message.reply('❌ ไม่พบคำสั่งนี้\nกรุณาใช้คำสั่ง `!romc-mvp` เพื่อดูรายการคำสั่งที่สามารถใช้งานได้ทั้งหมด');
