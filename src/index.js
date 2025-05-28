@@ -85,6 +85,12 @@ function convertCronToTimezone(cronExpression, timezone) {
     return cronExpression;
   }
   
+  // If timezone is the same as default, no conversion needed
+  if (timezone === DEFAULT_TIMEZONE) {
+    console.log(`🔄 No conversion needed (${timezone} = ${DEFAULT_TIMEZONE}): ${cronExpression}`);
+    return cronExpression;
+  }
+  
   // Parse the cron expression
   const parts = cronExpression.split(' ');
   if (parts.length !== 5) {
@@ -96,7 +102,7 @@ function convertCronToTimezone(cronExpression, timezone) {
   const hour = parseInt(parts[1], 10);
   
   console.log(`🔄 Converting cron from ${DEFAULT_TIMEZONE} to ${timezone}:`);
-  console.log(`   Original: ${cronExpression} (${hour}:${minute.toString().padStart(2, '0')})`);
+  console.log(`   Original: ${cronExpression} (${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')})`);
   
   // The NOTIFICATION_TIMES are defined in Bangkok time (Asia/Bangkok)
   // Create a dayjs object for today at the specified hour/minute in Bangkok timezone
@@ -107,8 +113,8 @@ function convertCronToTimezone(cronExpression, timezone) {
   
   // Return new cron expression with adjusted hour/minute
   const convertedCron = `${targetTime.minute()} ${targetTime.hour()} ${parts[2]} ${parts[3]} ${parts[4]}`;
-  console.log(`   Converted: ${convertedCron} (${targetTime.hour()}:${targetTime.minute().toString().padStart(2, '0')})`);
-  console.log(`   Bangkok time: ${localTime.format('HH:mm')}, ${timezone} time: ${targetTime.format('HH:mm')}`);
+  console.log(`   Converted: ${convertedCron} (${targetTime.hour().toString().padStart(2, '0')}:${targetTime.minute().toString().padStart(2, '0')})`);
+  console.log(`   ${DEFAULT_TIMEZONE} time: ${localTime.format('HH:mm')} → ${timezone} time: ${targetTime.format('HH:mm')}`);
   
   return convertedCron;
 }
@@ -180,8 +186,12 @@ function initUserPreferences(userId, userPrefs) {
 async function sendNotificationToUser(userId, timeLabel) {
   try {
     console.log(`📤 Attempting to send notification to user ${userId} for ${timeLabel}`);
+    console.log(`🔍 Environment check - NOTIFICATION_CHANNEL_ID: ${process.env.NOTIFICATION_CHANNEL_ID}`);
+    console.log(`🔍 Environment check - BOT_TOKEN exists: ${!!process.env.BOT_TOKEN}`);
+    console.log(`🔍 Client ready state: ${client.readyAt ? 'Ready' : 'Not ready'}`);
     
     const userPrefs = await loadUserPreferences();
+    console.log(`📋 User preferences loaded for ${userId}: ${JSON.stringify(userPrefs[userId] || 'No preferences found')}`);
     
     // Skip if user has paused notifications
     if (userPrefs[userId]?.paused) {
@@ -192,11 +202,13 @@ async function sendNotificationToUser(userId, timeLabel) {
     console.log(`🔍 Fetching channel ${process.env.NOTIFICATION_CHANNEL_ID}`);
     const channel = await client.channels.fetch(process.env.NOTIFICATION_CHANNEL_ID);
     if (channel) {
-      console.log(`✅ Channel found: ${channel.name} (${channel.id})`);
+      console.log(`✅ Channel found: ${channel.name} (${channel.id}) - Type: ${channel.type}`);
+      console.log(`🔍 Channel permissions - Can send messages: ${channel.permissionsFor(client.user)?.has('SendMessages')}`);
       
       // Get user's timezone for display
       const userTimezone = userPrefs[userId]?.timezone || DEFAULT_TIMEZONE;
       const currentTime = dayjs().tz(userTimezone).format('HH:mm');
+      console.log(`🌐 User timezone: ${userTimezone}, Current time: ${currentTime}`);
       
       // Convert the MVP time from Bangkok timezone to user's timezone
       // Extract the time from timeLabel (e.g., "18:00 น." -> "18:00")
@@ -205,21 +217,27 @@ async function sendNotificationToUser(userId, timeLabel) {
       
       if (timeMatch) {
         const [hours, minutes] = timeMatch[1].split(':').map(Number);
+        console.log(`🕐 Extracted time from label: ${hours}:${minutes}`);
         // Create time in Bangkok timezone
         const localTime = dayjs.tz(dayjs().format('YYYY-MM-DD'), DEFAULT_TIMEZONE).hour(hours).minute(minutes);
         // Convert to user's timezone
         const userTime = localTime.tz(userTimezone);
         mvpTimeInUserTz = `${userTime.format('HH:mm')} น.`;
+        console.log(`🔄 Time conversion: ${localTime.format('HH:mm')} (${DEFAULT_TIMEZONE}) → ${userTime.format('HH:mm')} (${userTimezone})`);
       }
       
       // Always send message to channel with user mention
       const message = `<@${userId}>\n⏰ **แจ้งเตือนล่วงหน้า 5 นาที**: MVP กำลังจะเกิดในเวลา ${mvpTimeInUserTz}! อย่าลืมเตรียมตัวให้พร้อมนะ!\n(เวลาท้องถิ่นของคุณ: ${currentTime} - ${userTimezone})`;
       
       console.log(`📝 Sending message: ${message.substring(0, 100)}...`);
+      console.log(`📝 Full message length: ${message.length} characters`);
+      
       const sentMessage = await channel.send(message);
       console.log(`✅ Notification sent successfully! Message ID: ${sentMessage.id}`);
+      console.log(`✅ Message URL: https://discord.com/channels/${channel.guild?.id || '@me'}/${channel.id}/${sentMessage.id}`);
     } else {
       console.error(`❌ Channel not found: ${process.env.NOTIFICATION_CHANNEL_ID}`);
+      console.error(`❌ Available channels: ${client.channels.cache.map(c => `${c.name} (${c.id})`).join(', ')}`);
     }
   } catch (err) {
     console.error(`❌ Error sending notification to user ${userId}:`, err);
@@ -227,8 +245,18 @@ async function sendNotificationToUser(userId, timeLabel) {
       name: err.name,
       message: err.message,
       code: err.code,
-      stack: err.stack?.split('\n').slice(0, 3).join('\n')
+      status: err.status,
+      stack: err.stack?.split('\n').slice(0, 5).join('\n')
     });
+    
+    // Additional debugging for common Discord API errors
+    if (err.code === 50013) {
+      console.error(`❌ Missing permissions to send messages in channel ${process.env.NOTIFICATION_CHANNEL_ID}`);
+    } else if (err.code === 10003) {
+      console.error(`❌ Channel ${process.env.NOTIFICATION_CHANNEL_ID} not found or bot doesn't have access`);
+    } else if (err.code === 50001) {
+      console.error(`❌ Bot missing access to channel ${process.env.NOTIFICATION_CHANNEL_ID}`);
+    }
   }
 }
 
@@ -504,16 +532,15 @@ async function setupNotifications() {
         return;
       }
       
-      // Convert cron expressions to user's timezone
+      // Use original Bangkok time cron expression since we're specifying user timezone in cron options
       const originalCron = timeInfo.earlyWarningCron;
-      const earlyWarningCronInTz = convertCronToTimezone(timeInfo.earlyWarningCron, userTimezone);
       
       console.log(`   ⏰ Setting up notification for ${timeInfo.label}:`);
-      console.log(`      Original cron (Bangkok): ${originalCron}`);
-      console.log(`      Converted cron (${userTimezone}): ${earlyWarningCronInTz}`);
+      console.log(`      Bangkok time cron: ${originalCron}`);
+      console.log(`      Will run in timezone: ${userTimezone}`);
       
       // Schedule 5-minute early warning only
-      const earlyWarningJob = cron.schedule(earlyWarningCronInTz, async () => {
+      const earlyWarningJob = cron.schedule(originalCron, async () => {
         console.log(`🔔 Triggering notification for user ${userId} at ${timeInfo.label}`);
         console.log(`   🕐 Current server time: ${dayjs().format('YYYY-MM-DD HH:mm:ss')}`);
         console.log(`   🌐 User timezone: ${userTimezone}`);
@@ -521,7 +548,7 @@ async function setupNotifications() {
         await sendNotificationToUser(userId, timeInfo.label);
       }, {
         scheduled: true,
-        timezone: 'UTC' // Force UTC to avoid server timezone issues
+        timezone: userTimezone // Use user's timezone instead of forcing UTC
       });
       
       // If notifications are paused, stop the job immediately
@@ -602,6 +629,8 @@ function scheduleDailyMessage() {
     } catch (err) {
       console.error('Error sending daily selector:', err);
     }
+  }, {
+    timezone: DEFAULT_TIMEZONE // Use default timezone (Bangkok) instead of server timezone
   });
 
   // In test mode, also show a notification that daily messages are scheduled
