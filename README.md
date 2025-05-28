@@ -170,6 +170,15 @@ For additional timezones, refer to the [IANA Time Zone Database](https://www.ian
 - `BOT_TOKEN=DISABLED` - Bot will not start
 - `NOTIFICATION_CHANNEL_ID=DISABLED` - Notifications will be disabled
 
+### Example Working `.env` File
+```env
+BOT_TOKEN=abcdefgeijklmnopqrstuvxyz
+NOTIFICATION_CHANNEL_ID=123456789012345678
+DEFAULT_TIMEZONE=Asia/Bangkok
+TEST_MODE=true
+```
+*Note: Replace with your actual bot token and channel ID*
+
 ## 📝 Usage Flow
 
 1. **Setup**: Use `!romc-mvp setup` to configure your notification times
