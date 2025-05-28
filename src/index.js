@@ -203,25 +203,47 @@ async function sendNotificationToUser(userId, timeLabel) {
 
 // Create notification select menu
 function createNotificationMenu(selectedTimes = [], autoApply = false) {
-  const row = new ActionRowBuilder()
-    .addComponents(
-      new StringSelectMenuBuilder()
-        .setCustomId('notification_times')
-        .setPlaceholder(selectedTimes.length > 0 
-          ? `แก้ไข ${selectedTimes.length} เวลาที่เลือกไว้` 
-          : 'เลือกเวลาการแจ้งเตือน')
-        .setMinValues(0)
-        .setMaxValues(NOTIFICATION_TIMES.length)
-        .addOptions(NOTIFICATION_TIMES.map(time => {
-          const isSelected = selectedTimes.includes(time.value);
-          return {
-            label: isSelected ? `✓ ${time.label}` : time.label,
-            value: time.value,
-            description: `รับแจ้งเตือนในเวลา ${time.label}`,
-            default: isSelected
-          };
-        }))
-    );
+  // Discord has a limit of 25 options per select menu
+  const maxOptionsPerMenu = 25;
+  const maxSelectableValues = Math.min(25, NOTIFICATION_TIMES.length);
+  
+  // Split notification times into chunks if needed
+  const timeChunks = [];
+  for (let i = 0; i < NOTIFICATION_TIMES.length; i += maxOptionsPerMenu) {
+    timeChunks.push(NOTIFICATION_TIMES.slice(i, i + maxOptionsPerMenu));
+  }
+  
+  const rows = [];
+  
+  // Create select menus for each chunk
+  timeChunks.forEach((chunk, index) => {
+    const customId = timeChunks.length > 1 ? `notification_times_${index}` : 'notification_times';
+    const placeholder = timeChunks.length > 1 
+      ? `เลือกเวลาแจ้งเตือน (ชุดที่ ${index + 1}/${timeChunks.length})`
+      : (selectedTimes.length > 0 
+        ? `แก้ไข ${selectedTimes.length} เวลาที่เลือกไว้` 
+        : 'เลือกเวลาการแจ้งเตือน');
+    
+    const row = new ActionRowBuilder()
+      .addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(customId)
+          .setPlaceholder(placeholder)
+          .setMinValues(0)
+          .setMaxValues(Math.min(chunk.length, maxSelectableValues))
+          .addOptions(chunk.map(time => {
+            const isSelected = selectedTimes.includes(time.value);
+            return {
+              label: isSelected ? `✓ ${time.label}` : time.label,
+              value: time.value,
+              description: `รับแจ้งเตือนในเวลา ${time.label}`,
+              default: isSelected
+            };
+          }))
+      );
+    
+    rows.push(row);
+  });
   
   const autoApplyRow = new ActionRowBuilder()
     .addComponents(
@@ -235,7 +257,9 @@ function createNotificationMenu(selectedTimes = [], autoApply = false) {
         .setStyle(!autoApply ? ButtonStyle.Primary : ButtonStyle.Secondary)
     );
   
-  return [row, autoApplyRow];
+  rows.push(autoApplyRow);
+  
+  return rows;
 }
 
 // Create timezone selection menu
@@ -578,26 +602,48 @@ client.once('ready', async () => {
 
 // Interaction handling for select menu and buttons
 client.on('interactionCreate', async interaction => {
-  // Handle select menu interactions
-  if (interaction.isStringSelectMenu() && interaction.customId === 'notification_times') {
+  // Handle select menu interactions for notification times (including multiple menus)
+  if (interaction.isStringSelectMenu() && (interaction.customId === 'notification_times' || interaction.customId.startsWith('notification_times_'))) {
     const userId = interaction.user.id;
     const selectedTimes = interaction.values;
     
     // Load current preferences
     const userPrefs = await loadUserPreferences();
     
-    // Check what changed from previous selections
-    const previousTimes = userPrefs[userId]?.times || [];
-    const added = selectedTimes.filter(time => !previousTimes.includes(time));
-    const removed = previousTimes.filter(time => !selectedTimes.includes(time));
-    
     // Initialize user if they don't exist
     if (!userPrefs[userId]) {
       userPrefs[userId] = initUserPreferences(userId, userPrefs);
     }
     
+    // Get existing temporary times or current times
+    let allSelectedTimes = userPrefs[userId].tempTimes || userPrefs[userId].times || [];
+    
+    // If this is a multi-menu setup, we need to merge selections from all menus
+    if (interaction.customId.startsWith('notification_times_')) {
+      // Remove any previous selections from this specific menu chunk
+      const menuIndex = parseInt(interaction.customId.split('_')[2]);
+      const maxOptionsPerMenu = 25;
+      const chunkStart = menuIndex * maxOptionsPerMenu;
+      const chunkEnd = chunkStart + maxOptionsPerMenu;
+      const chunkTimes = NOTIFICATION_TIMES.slice(chunkStart, chunkEnd).map(t => t.value);
+      
+      // Remove old selections from this chunk
+      allSelectedTimes = allSelectedTimes.filter(time => !chunkTimes.includes(time));
+      
+      // Add new selections from this chunk
+      allSelectedTimes = [...allSelectedTimes, ...selectedTimes];
+    } else {
+      // Single menu, replace all selections
+      allSelectedTimes = selectedTimes;
+    }
+    
+    // Check what changed from previous selections
+    const previousTimes = userPrefs[userId]?.times || [];
+    const added = allSelectedTimes.filter(time => !previousTimes.includes(time));
+    const removed = previousTimes.filter(time => !allSelectedTimes.includes(time));
+    
     // Store selected times temporarily (don't set up notifications yet)
-    userPrefs[userId].tempTimes = selectedTimes;
+    userPrefs[userId].tempTimes = allSelectedTimes;
     
     // Save preferences (but don't update actual notifications yet)
     await saveUserPreferences(userPrefs);
@@ -607,8 +653,8 @@ client.on('interactionCreate', async interaction => {
       .addComponents(
         new StringSelectMenuBuilder()
           .setCustomId('notification_times_disabled')
-          .setPlaceholder(selectedTimes.length > 0 
-            ? `✅ เลือก ${selectedTimes.length} เวลาเรียบร้อยแล้ว` 
+          .setPlaceholder(allSelectedTimes.length > 0 
+            ? `✅ เลือก ${allSelectedTimes.length} เวลาเรียบร้อยแล้ว` 
             : 'ยังไม่ได้เลือกเวลาแจ้งเตือน')
           .setDisabled(true)
           .addOptions([{
@@ -662,7 +708,7 @@ client.on('interactionCreate', async interaction => {
     }
 
     // Send a detailed selection confirmation as ephemeral message to the user
-    const timesList = selectedTimes.map(t => {
+    const timesList = allSelectedTimes.map(t => {
       const time = NOTIFICATION_TIMES.find(nt => nt.value === t);
       return `• ${time ? time.label : t}`;
     }).join('\n');
