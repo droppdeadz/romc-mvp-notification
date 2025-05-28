@@ -37,8 +37,8 @@ Create a `.env` file in the root directory:
 
 ```env
 # Discord Bot Configuration (REQUIRED)
-BOT_TOKEN=your_discord_bot_token_here
-NOTIFICATION_CHANNEL_ID=your_channel_id_here
+BOT_TOKEN=YOUR_BOT_TOKEN_HERE
+NOTIFICATION_CHANNEL_ID=YOUR_CHANNEL_ID_HERE
 
 # Timezone Setting (Optional - defaults to Asia/Bangkok)
 DEFAULT_TIMEZONE=Asia/Bangkok
@@ -172,12 +172,12 @@ For additional timezones, refer to the [IANA Time Zone Database](https://www.ian
 
 ### Example Working `.env` File
 ```env
-BOT_TOKEN=abcdefgeijklmnopqrstuvxyz
-NOTIFICATION_CHANNEL_ID=123456789012345678
+BOT_TOKEN=YOUR_BOT_TOKEN_HERE
+NOTIFICATION_CHANNEL_ID=YOUR_CHANNEL_ID_HERE
 DEFAULT_TIMEZONE=Asia/Bangkok
 TEST_MODE=true
 ```
-*Note: Replace with your actual bot token and channel ID*
+*Note: Replace YOUR_BOT_TOKEN_HERE with your actual Discord bot token and YOUR_CHANNEL_ID_HERE with your channel ID*
 
 ## 📝 Usage Flow
 
