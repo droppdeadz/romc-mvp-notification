@@ -23,7 +23,7 @@ if (isChannelDisabled) {
   process.exit(0);
 }
 
-const { Client, GatewayIntentBits, Partials, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags } = require('discord.js');
 const cron = require('node-cron');
 const fs = require('fs').promises;
 const path = require('path');
@@ -678,7 +678,7 @@ client.on('interactionCreate', async interaction => {
     
     await interaction.followUp({ 
       embeds: [userConfirmationEmbed],
-      ephemeral: true 
+      flags: [MessageFlags.Ephemeral] 
     });
   }
   
@@ -731,7 +731,7 @@ client.on('interactionCreate', async interaction => {
       console.error(`Error updating timezone: ${err}`);
       await interaction.reply({
         content: '❌ เกิดข้อผิดพลาดในการตั้งค่าโซนเวลา โปรดลองใหม่อีกครั้ง',
-        ephemeral: true
+        flags: [MessageFlags.Ephemeral]
       });
     }
   }
@@ -754,7 +754,7 @@ client.on('interactionCreate', async interaction => {
       if (!userPrefs[userId].tempTimes || userPrefs[userId].tempTimes.length === 0) {
         await interaction.reply({
           content: '❌ ไม่พบเวลาที่เลือกไว้ กรุณาเลือกเวลาแจ้งเตือนก่อน',
-          ephemeral: true
+          flags: [MessageFlags.Ephemeral]
         });
         return;
       }
@@ -793,7 +793,7 @@ client.on('interactionCreate', async interaction => {
       
       await interaction.reply({ 
         embeds: [confirmationEmbed],
-        ephemeral: true 
+        flags: [MessageFlags.Ephemeral] 
       });
       
       // Delete the setup message after a short delay
@@ -811,7 +811,7 @@ client.on('interactionCreate', async interaction => {
         // Send feedback message first so user knows something is happening
         await interaction.reply({
           content: '⌛ กำลังเปิดเมนูตั้งค่าเวลาแจ้งเตือน...',
-          ephemeral: true
+          flags: [MessageFlags.Ephemeral]
         });
         
         // Send notification selection menu
@@ -820,7 +820,7 @@ client.on('interactionCreate', async interaction => {
         if (!setupMsg) {
           await interaction.editReply({
             content: '❌ ไม่สามารถตั้งค่าเมนูแจ้งเตือนได้ โปรดลองใหม่อีกครั้ง',
-            ephemeral: true
+            flags: [MessageFlags.Ephemeral]
           });
           return;
         }
@@ -828,7 +828,7 @@ client.on('interactionCreate', async interaction => {
         // Update the reply with success message
         await interaction.editReply({
           content: '✅ เปิดเมนูตั้งค่าแล้ว กรุณาเลือกเวลาที่ต้องการรับการแจ้งเตือน',
-          ephemeral: true
+          flags: [MessageFlags.Ephemeral]
         });
         
         // Try to delete original message
@@ -843,7 +843,7 @@ client.on('interactionCreate', async interaction => {
         console.error(`Error handling setup_now button: ${err}`);
         await interaction.editReply({
           content: '❌ เกิดข้อผิดพลาด โปรดลองใหม่อีกครั้ง',
-          ephemeral: true
+          flags: [MessageFlags.Ephemeral]
         });
       }
     }
@@ -918,7 +918,7 @@ client.on('messageCreate', async message => {
           await message.reply({
             embeds: [embed],
             components: createNotificationMenu(selectedTimes, autoApply),
-            ephemeral: true
+            flags: ['Ephemeral']
           });
           
           // Delete the command message to keep the channel clean
@@ -950,7 +950,7 @@ client.on('messageCreate', async message => {
             await message.reply({
               embeds: [embed],
               components: createNotificationMenu([], false),
-              ephemeral: true
+              flags: ['Ephemeral']
             });
             
             // Delete the command message to keep the channel clean
@@ -975,7 +975,7 @@ client.on('messageCreate', async message => {
           await message.reply({
             embeds: [embed],
             components: createNotificationMenu(selectedTimes, autoApply),
-            ephemeral: true
+            flags: [MessageFlags.Ephemeral]
           });
           
           // Delete the command message to keep the channel clean
