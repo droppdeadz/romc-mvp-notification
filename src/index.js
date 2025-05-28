@@ -45,22 +45,22 @@ const activeJobs = {};
 
 // Define notification times from the image
 const NOTIFICATION_TIMES = [
-  { label: '00:00 น.', value: '00:00', cronTime: '0 0 * * *', earlyWarningCron: '55 23 * * *' },
-  { label: '01:30 น.', value: '01:30', cronTime: '30 1 * * *', earlyWarningCron: '25 1 * * *' },
-  { label: '03:00 น.', value: '03:00', cronTime: '0 3 * * *', earlyWarningCron: '55 2 * * *' },
-  { label: '04:30 น.', value: '04:30', cronTime: '30 4 * * *', earlyWarningCron: '25 4 * * *' },
-  { label: '06:00 น.', value: '06:00', cronTime: '0 6 * * *', earlyWarningCron: '55 5 * * *' },
-  { label: '07:30 น.', value: '07:30', cronTime: '30 7 * * *', earlyWarningCron: '25 7 * * *' },
-  { label: '09:00 น.', value: '09:00', cronTime: '0 9 * * *', earlyWarningCron: '55 8 * * *' },
-  { label: '10:30 น.', value: '10:30', cronTime: '30 10 * * *', earlyWarningCron: '25 10 * * *' },
-  { label: '12:00 น.', value: '12:00', cronTime: '0 12 * * *', earlyWarningCron: '55 11 * * *' },
-  { label: '13:30 น.', value: '13:30', cronTime: '30 13 * * *', earlyWarningCron: '25 13 * * *' },
-  { label: '15:00 น.', value: '15:00', cronTime: '0 15 * * *', earlyWarningCron: '55 14 * * *' },
-  { label: '16:30 น.', value: '16:30', cronTime: '30 16 * * *', earlyWarningCron: '25 16 * * *' },
-  { label: '18:00 น.', value: '18:00', cronTime: '0 18 * * *', earlyWarningCron: '55 17 * * *' },
-  { label: '19:30 น.', value: '19:30', cronTime: '30 19 * * *', earlyWarningCron: '25 19 * * *' },
-  { label: '21:00 น.', value: '21:00', cronTime: '0 21 * * *', earlyWarningCron: '55 20 * * *' },
-  { label: '22:30 น.', value: '22:30', cronTime: '30 22 * * *', earlyWarningCron: '25 22 * * *' },
+  { label: '00:00 น.', value: '00:00', earlyWarningCron: '55 23 * * *' },
+  { label: '01:30 น.', value: '01:30', earlyWarningCron: '25 1 * * *' },
+  { label: '03:00 น.', value: '03:00', earlyWarningCron: '55 2 * * *' },
+  { label: '04:30 น.', value: '04:30', earlyWarningCron: '25 4 * * *' },
+  { label: '06:00 น.', value: '06:00', earlyWarningCron: '55 5 * * *' },
+  { label: '07:30 น.', value: '07:30', earlyWarningCron: '25 7 * * *' },
+  { label: '09:00 น.', value: '09:00', earlyWarningCron: '55 8 * * *' },
+  { label: '10:30 น.', value: '10:30', earlyWarningCron: '25 10 * * *' },
+  { label: '12:00 น.', value: '12:00', earlyWarningCron: '55 11 * * *' },
+  { label: '13:30 น.', value: '13:30', earlyWarningCron: '25 13 * * *' },
+  { label: '15:00 น.', value: '15:00', earlyWarningCron: '55 14 * * *' },
+  { label: '16:30 น.', value: '16:30', earlyWarningCron: '25 16 * * *' },
+  { label: '18:00 น.', value: '18:00', earlyWarningCron: '55 17 * * *' },
+  { label: '19:30 น.', value: '19:30', earlyWarningCron: '25 19 * * *' },
+  { label: '21:00 น.', value: '21:00', earlyWarningCron: '55 20 * * *' },
+  { label: '22:30 น.', value: '22:30', earlyWarningCron: '25 22 * * *' },
 ];
 
 // List of common timezones for selection menu
@@ -76,48 +76,6 @@ const COMMON_TIMEZONES = [
   { label: 'Europe/Paris (CET/CEST)', value: 'Europe/Paris' },
   { label: 'UTC', value: 'UTC' }
 ];
-
-// Function to convert cron time to a specific timezone
-function convertCronToTimezone(cronExpression, timezone) {
-  // If no timezone specified, use default
-  if (!timezone) {
-    console.log(`⚠️ No timezone specified, using original cron: ${cronExpression}`);
-    return cronExpression;
-  }
-  
-  // If timezone is the same as default, no conversion needed
-  if (timezone === DEFAULT_TIMEZONE) {
-    console.log(`🔄 No conversion needed (${timezone} = ${DEFAULT_TIMEZONE}): ${cronExpression}`);
-    return cronExpression;
-  }
-  
-  // Parse the cron expression
-  const parts = cronExpression.split(' ');
-  if (parts.length !== 5) {
-    console.log(`❌ Invalid cron expression: ${cronExpression}`);
-    return cronExpression; // Invalid cron expression
-  }
-  
-  const minute = parseInt(parts[0], 10);
-  const hour = parseInt(parts[1], 10);
-  
-  console.log(`🔄 Converting cron from ${DEFAULT_TIMEZONE} to ${timezone}:`);
-  console.log(`   Original: ${cronExpression} (${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')})`);
-  
-  // The NOTIFICATION_TIMES are defined in Bangkok time (Asia/Bangkok)
-  // Create a dayjs object for today at the specified hour/minute in Bangkok timezone
-  const localTime = dayjs.tz(dayjs().format('YYYY-MM-DD'), DEFAULT_TIMEZONE).hour(hour).minute(minute).second(0);
-  
-  // Convert to target timezone
-  const targetTime = localTime.tz(timezone);
-  
-  // Return new cron expression with adjusted hour/minute
-  const convertedCron = `${targetTime.minute()} ${targetTime.hour()} ${parts[2]} ${parts[3]} ${parts[4]}`;
-  console.log(`   Converted: ${convertedCron} (${targetTime.hour().toString().padStart(2, '0')}:${targetTime.minute().toString().padStart(2, '0')})`);
-  console.log(`   ${DEFAULT_TIMEZONE} time: ${localTime.format('HH:mm')} → ${timezone} time: ${targetTime.format('HH:mm')}`);
-  
-  return convertedCron;
-}
 
 // Initialize Discord client
 const client = new Client({
@@ -586,14 +544,6 @@ async function testNotification(userId, timeValue, channel) {
   try {
     const timeInfo = NOTIFICATION_TIMES.find(t => t.value === timeValue);
     if (!timeInfo) {
-      // If no specific time was provided, use the current time
-      const now = new Date();
-      const hours = now.getHours();
-      const minutes = now.getMinutes();
-      const formattedHours = hours < 10 ? `0${hours}` : hours;
-      const formattedMinutes = minutes < 10 ? `0${minutes}` : minutes;
-      const currentTime = `${formattedHours}:${formattedMinutes}`;
-      
       await channel.send(`❌ ไม่พบเวลาที่ระบุ: ${timeValue} กรุณาเลือกเวลาที่ถูกต้องจากรายการ`);
       return false;
     }
@@ -1238,7 +1188,7 @@ client.on('messageCreate', async message => {
         
         // Test each notification time with a delay between them
         for (const timeInfo of NOTIFICATION_TIMES) {
-          await testNotification(userId, timeInfo.value, message.channel, false);
+          await testNotification(userId, timeInfo.value, message.channel);
           await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay between notifications
         }
         
