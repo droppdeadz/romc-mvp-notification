@@ -106,9 +106,10 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessageReactions
   ],
-  partials: [Partials.Channel, Partials.Message]
+  partials: [Partials.Channel, Partials.Message, Partials.Reaction]
 });
 
 // Ensure data directory exists
@@ -1599,7 +1600,7 @@ client.on('messageCreate', async message => {
             const collected = await confirmMsg.awaitReactions({ 
               filter, 
               max: 1, 
-              time: 30000, 
+              time: 30000,
               errors: ['time'] 
             }).catch(() => null);
             
