@@ -41,7 +41,7 @@ const DB_PATH = path.join(__dirname, '..', 'data');
 const USER_PREFS_FILE = path.join(DB_PATH, 'user_preferences.json');
 
 // Track active scheduled jobs
-const activeJobs = {};
+let activeJobs = {};
 
 // Debounce mechanism for setupNotifications
 let setupNotificationsTimeout = null;
@@ -64,8 +64,8 @@ function clearAllActiveJobs() {
     }
   });
   
-  // Clear the activeJobs object
-  activeJobs = {};
+  // Clear the activeJobs object by removing all properties
+  Object.keys(activeJobs).forEach(key => delete activeJobs[key]);
   console.log(`✅ All jobs cleared. Active jobs count: ${Object.keys(activeJobs).length}`);
 }
 
@@ -737,296 +737,333 @@ client.once('ready', async () => {
 
 // Interaction handling for select menu and buttons
 client.on('interactionCreate', async interaction => {
-  // Handle select menu interactions for notification times (including multiple menus)
-  if (interaction.isStringSelectMenu() && (interaction.customId === 'notification_times' || interaction.customId.startsWith('notification_times_'))) {
-    const userId = interaction.user.id;
-    const selectedTimes = interaction.values;
-    
-    // Load current preferences
-    const userPrefs = await loadUserPreferences();
-    
-    // Initialize user if they don't exist
-    if (!userPrefs[userId]) {
-      userPrefs[userId] = initUserPreferences(userId, userPrefs);
-    }
-    
-    // Get existing temporary times or current times
-    let allSelectedTimes = userPrefs[userId].tempTimes || userPrefs[userId].times || [];
-    
-    // If this is a multi-menu setup, we need to merge selections from all menus
-    if (interaction.customId.startsWith('notification_times_')) {
-      // Remove any previous selections from this specific menu chunk
-      const menuIndex = parseInt(interaction.customId.split('_')[2]);
-      const maxOptionsPerMenu = 25;
-      const chunkStart = menuIndex * maxOptionsPerMenu;
-      const chunkEnd = chunkStart + maxOptionsPerMenu;
-      const chunkTimes = NOTIFICATION_TIMES.slice(chunkStart, chunkEnd).map(t => t.value);
-      
-      // Remove old selections from this chunk
-      allSelectedTimes = allSelectedTimes.filter(time => !chunkTimes.includes(time));
-      
-      // Add new selections from this chunk
-      allSelectedTimes = [...allSelectedTimes, ...selectedTimes];
-    } else {
-      // Single menu, replace all selections
-      allSelectedTimes = selectedTimes;
-    }
-    
-    // Check what changed from previous selections
-    const previousTimes = userPrefs[userId]?.times || [];
-    const added = allSelectedTimes.filter(time => !previousTimes.includes(time));
-    const removed = previousTimes.filter(time => !allSelectedTimes.includes(time));
-    
-    // Store selected times temporarily (don't set up notifications yet)
-    userPrefs[userId].tempTimes = allSelectedTimes;
-    
-    // Save preferences (but don't update actual notifications yet)
-    await saveUserPreferences(userPrefs);
-    
-    // Create disabled dropdown with user's selections
-    const disabledRow = new ActionRowBuilder()
-      .addComponents(
-        new StringSelectMenuBuilder()
-          .setCustomId('notification_times_disabled')
-          .setPlaceholder(allSelectedTimes.length > 0 
-            ? `✅ เลือก ${allSelectedTimes.length} เวลาเรียบร้อยแล้ว` 
-            : 'ยังไม่ได้เลือกเวลาแจ้งเตือน')
-          .setDisabled(true)
-          .addOptions([{
-            label: 'การเลือกเสร็จสิ้น',
-            value: 'completed',
-            description: 'คุณได้เลือกเวลาแจ้งเตือนแล้ว'
-          }])
-      );
-    
-    // Keep the auto-apply buttons active
-    const autoApplyRow = new ActionRowBuilder()
-      .addComponents(
-        new ButtonBuilder()
-          .setCustomId('auto_apply_yes')
-          .setLabel('บันทึกเป็นเวลาเริ่มต้น')
-          .setStyle(ButtonStyle.Success),
-        new ButtonBuilder()
-          .setCustomId('auto_apply_no')
-          .setLabel('เฉพาะครั้งนี้')
-          .setStyle(ButtonStyle.Secondary)
-      );
-    
-    // Create the embed with the user's selections
-    const updatedEmbed = new EmbedBuilder()
-      .setTitle('🔔 เวลาแจ้งเตือน')
-      .setDescription(`✅ **เลือกเวลาเรียบร้อยแล้ว**\n\nกรุณาเลือกว่าต้องการบันทึกเป็นค่าเริ่มต้นหรือใช้เฉพาะครั้งนี้`)
-      .setColor('#5865F2')
-      .setFooter({ text: 'การแจ้งเตือนจะเริ่มทำงานหลังจากกดปุ่มด้านล่าง' });
-    
-    // Update the original message
-    await interaction.update({
-      embeds: [updatedEmbed],
-      components: [disabledRow, autoApplyRow]
-    });
-    
-    // Build a more detailed feedback message
-    let timeChangeInfo = '';
-    if (added.length > 0) {
-      const addedLabels = added.map(timeVal => {
-        const time = NOTIFICATION_TIMES.find(t => t.value === timeVal);
-        return time ? time.label : timeVal;
-      }).join(', ');
-      timeChangeInfo += `เพิ่มเวลา: ${addedLabels}\n`;
-    }
-    if (removed.length > 0) {
-      const removedLabels = removed.map(timeVal => {
-        const time = NOTIFICATION_TIMES.find(t => t.value === timeVal);
-        return time ? time.label : timeVal;
-      }).join(', ');
-      timeChangeInfo += `ลบเวลา: ${removedLabels}\n`;
-    }
-
-    // Send a detailed selection confirmation as ephemeral message to the user
-    const timesList = allSelectedTimes.map(t => {
-      const time = NOTIFICATION_TIMES.find(nt => nt.value === t);
-      return `• ${time ? time.label : t}`;
-    }).join('\n');
-    
-    const userConfirmationEmbed = new EmbedBuilder()
-      .setTitle(`🔔 เวลาแจ้งเตือนที่เลือก`)
-      .setDescription(
-        `**เวลาที่คุณเลือก:**\n${timesList}\n\n` +
-        (timeChangeInfo ? `**การเปลี่ยนแปลง:**\n${timeChangeInfo}\n` : '') +
-        `**ขั้นตอนถัดไป:**\nกดปุ่ม "บันทึกเป็นเวลาเริ่มต้น" หรือ "เฉพาะครั้งนี้" เพื่อเริ่มการแจ้งเตือน`
-      )
-      .setColor('#FFA500')
-      .setFooter({ text: 'การแจ้งเตือนยังไม่เริ่มทำงาน - รอการยืนยัน' });
-    
-    await interaction.followUp({ 
-      embeds: [userConfirmationEmbed],
-      flags: [MessageFlags.Ephemeral] 
-    });
-  }
-  
-  // Handle timezone selection
-  if (interaction.isStringSelectMenu() && interaction.customId === 'timezone_select') {
-    const userId = interaction.user.id;
-    const selectedTimezone = interaction.values[0];
-    
-    try {
-      // Load current preferences
-      const userPrefs = await loadUserPreferences();
-      
-      // Ensure user exists in preferences
-      if (!userPrefs[userId]) {
-        userPrefs[userId] = initUserPreferences(userId, userPrefs);
-      }
-      
-      // Update timezone setting
-      userPrefs[userId].timezone = selectedTimezone;
-      
-      // Save preferences
-      await saveUserPreferences(userPrefs);
-      
-      // Update notifications with new timezone (use debounced version)
-      await setupNotificationsDebounced();
-      
-      // Get local time in the selected timezone for display
-      const currentTime = dayjs().tz(selectedTimezone).format('HH:mm');
-      
-      // Send confirmation
-      await interaction.update({
-        content: `✅ โซนเวลาของคุณถูกตั้งเป็น **${selectedTimezone}** เรียบร้อยแล้ว\nเวลาปัจจุบันในโซนเวลาของคุณคือ **${currentTime}**`,
-        embeds: [],
-        components: []
-      });
-      
-      setTimeout(async () => {
-        try {
-          // Try to delete the message after a delay
-          const message = await interaction.channel.messages.fetch(interaction.message.id);
-          if (message && message.deletable) {
-            await message.delete();
-          }
-        } catch (err) {
-          console.error(`Error deleting timezone message: ${err}`);
-        }
-      }, 10000); // Delete after 10 seconds
-      
-    } catch (err) {
-      console.error(`Error updating timezone: ${err}`);
-      await interaction.reply({
-        content: '❌ เกิดข้อผิดพลาดในการตั้งค่าโซนเวลา โปรดลองใหม่อีกครั้ง',
-        flags: [MessageFlags.Ephemeral]
-      });
-    }
-  }
-  
-  // Handle button interactions for auto-apply
-  if (interaction.isButton()) {
-    if (interaction.customId === 'auto_apply_yes' || interaction.customId === 'auto_apply_no') {
-      const userId = interaction.user.id;
-      const autoApply = interaction.customId === 'auto_apply_yes';
-      
-      // Load current preferences
-      const userPrefs = await loadUserPreferences();
-      
-      // Ensure user exists in preferences
-      if (!userPrefs[userId]) {
-        userPrefs[userId] = initUserPreferences(userId, userPrefs);
-      }
-      
-      // Check if user has temporary times selected
-      if (!userPrefs[userId].tempTimes || userPrefs[userId].tempTimes.length === 0) {
-        await interaction.reply({
-          content: '❌ ไม่พบเวลาที่เลือกไว้ กรุณาเลือกเวลาแจ้งเตือนก่อน',
-          flags: [MessageFlags.Ephemeral]
-        });
+  try {
+    // Handle select menu interactions for notification times (including multiple menus)
+    if (interaction.isStringSelectMenu() && (interaction.customId === 'notification_times' || interaction.customId.startsWith('notification_times_'))) {
+      // Check if interaction is already acknowledged
+      if (interaction.replied || interaction.deferred) {
+        console.log('Interaction already acknowledged, skipping...');
         return;
       }
+
+      const userId = interaction.user.id;
+      const selectedTimes = interaction.values;
       
-      // Move temporary times to actual times
-      userPrefs[userId].times = userPrefs[userId].tempTimes;
-      userPrefs[userId].autoApply = autoApply;
+      // Load current preferences
+      const userPrefs = await loadUserPreferences();
       
-      // Clear temporary times
-      delete userPrefs[userId].tempTimes;
+      // Initialize user if they don't exist
+      if (!userPrefs[userId]) {
+        userPrefs[userId] = initUserPreferences(userId, userPrefs);
+      }
       
-      // Save preferences
+      // Get existing temporary times or current times
+      let allSelectedTimes = userPrefs[userId].tempTimes || userPrefs[userId].times || [];
+      
+      // If this is a multi-menu setup, we need to merge selections from all menus
+      if (interaction.customId.startsWith('notification_times_')) {
+        // Remove any previous selections from this specific menu chunk
+        const menuIndex = parseInt(interaction.customId.split('_')[2]);
+        const maxOptionsPerMenu = 25;
+        const chunkStart = menuIndex * maxOptionsPerMenu;
+        const chunkEnd = chunkStart + maxOptionsPerMenu;
+        const chunkTimes = NOTIFICATION_TIMES.slice(chunkStart, chunkEnd).map(t => t.value);
+        
+        // Remove old selections from this chunk
+        allSelectedTimes = allSelectedTimes.filter(time => !chunkTimes.includes(time));
+        
+        // Add new selections from this chunk
+        allSelectedTimes = [...allSelectedTimes, ...selectedTimes];
+      } else {
+        // Single menu, replace all selections
+        allSelectedTimes = selectedTimes;
+      }
+      
+      // Check what changed from previous selections
+      const previousTimes = userPrefs[userId]?.times || [];
+      const added = allSelectedTimes.filter(time => !previousTimes.includes(time));
+      const removed = previousTimes.filter(time => !allSelectedTimes.includes(time));
+      
+      // Store selected times temporarily (don't set up notifications yet)
+      userPrefs[userId].tempTimes = allSelectedTimes;
+      
+      // Save preferences (but don't update actual notifications yet)
       await saveUserPreferences(userPrefs);
       
-      // Set up notifications now (use debounced version)
-      await setupNotificationsDebounced();
+      // Create disabled dropdown with user's selections
+      const disabledRow = new ActionRowBuilder()
+        .addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId('notification_times_disabled')
+            .setPlaceholder(allSelectedTimes.length > 0 
+              ? `✅ เลือก ${allSelectedTimes.length} เวลาเรียบร้อยแล้ว` 
+              : 'ยังไม่ได้เลือกเวลาแจ้งเตือน')
+            .setDisabled(true)
+            .addOptions([{
+              label: 'การเลือกเสร็จสิ้น',
+              value: 'completed',
+              description: 'คุณได้เลือกเวลาแจ้งเตือนแล้ว'
+            }])
+        );
       
-      // Get the selected times for confirmation
-      const timesList = userPrefs[userId].times.map(timeValue => {
-        const timeInfo = NOTIFICATION_TIMES.find(t => t.value === timeValue);
-        return `• ${timeInfo ? timeInfo.label : timeValue}`;
-      }).join('\n');
+      // Keep the auto-apply buttons active
+      const autoApplyRow = new ActionRowBuilder()
+        .addComponents(
+          new ButtonBuilder()
+            .setCustomId('auto_apply_yes')
+            .setLabel('บันทึกเป็นเวลาเริ่มต้น')
+            .setStyle(ButtonStyle.Success),
+          new ButtonBuilder()
+            .setCustomId('auto_apply_no')
+            .setLabel('เฉพาะครั้งนี้')
+            .setStyle(ButtonStyle.Secondary)
+        );
       
-      const confirmationEmbed = new EmbedBuilder()
-        .setTitle('✅ ตั้งค่าการแจ้งเตือนเสร็จสิ้น')
-        .setDescription(
-          `🎉 **การแจ้งเตือนเริ่มทำงานแล้ว!**\n\n` +
-          `**เวลาที่ตั้งไว้:**\n${timesList}\n\n` +
-          `**การตั้งค่า:**\n` +
-          `• ${autoApply ? '✅ บันทึกเป็นค่าเริ่มต้น - จะใช้ทุกวัน' : '⏱️ เฉพาะครั้งนี้ - จะรีเซ็ตพรุ่งนี้'}\n` +
-          `• 🌐 โซนเวลา: ${userPrefs[userId].timezone || DEFAULT_TIMEZONE}\n\n` +
-          `**คุณจะได้รับ:**\n• ⏰ แจ้งเตือนล่วงหน้า 5 นาที`
-        )
-        .setColor('#00FF00')
-        .setFooter({ text: 'ROMC MVP Notification System' });
+      // Create the embed with the user's selections
+      const updatedEmbed = new EmbedBuilder()
+        .setTitle('🔔 เวลาแจ้งเตือน')
+        .setDescription(`✅ **เลือกเวลาเรียบร้อยแล้ว**\n\nกรุณาเลือกว่าต้องการบันทึกเป็นค่าเริ่มต้นหรือใช้เฉพาะครั้งนี้`)
+        .setColor('#5865F2')
+        .setFooter({ text: 'การแจ้งเตือนจะเริ่มทำงานหลังจากกดปุ่มด้านล่าง' });
       
-      await interaction.reply({ 
-        embeds: [confirmationEmbed],
-        flags: [MessageFlags.Ephemeral] 
+      // Update the original message
+      await interaction.update({
+        embeds: [updatedEmbed],
+        components: [disabledRow, autoApplyRow]
       });
       
-      // Delete the setup message after a short delay
-      setTimeout(async () => {
-        try {
-          if (interaction.message && interaction.message.deletable) {
-            await interaction.message.delete();
-          }
-        } catch (err) {
-          console.error(`Error deleting message after selection: ${err}`);
-        }
-      }, 5000); // Delete after 5 seconds
-    } else if (interaction.customId === 'setup_now') {
+      // Build a more detailed feedback message
+      let timeChangeInfo = '';
+      if (added.length > 0) {
+        const addedLabels = added.map(timeVal => {
+          const time = NOTIFICATION_TIMES.find(t => t.value === timeVal);
+          return time ? time.label : timeVal;
+        }).join(', ');
+        timeChangeInfo += `เพิ่มเวลา: ${addedLabels}\n`;
+      }
+      if (removed.length > 0) {
+        const removedLabels = removed.map(timeVal => {
+          const time = NOTIFICATION_TIMES.find(t => t.value === timeVal);
+          return time ? time.label : timeVal;
+        }).join(', ');
+        timeChangeInfo += `ลบเวลา: ${removedLabels}\n`;
+      }
+
+      // Send a detailed selection confirmation as ephemeral message to the user
+      const timesList = allSelectedTimes.map(t => {
+        const time = NOTIFICATION_TIMES.find(nt => nt.value === t);
+        return `• ${time ? time.label : t}`;
+      }).join('\n');
+      
+      const userConfirmationEmbed = new EmbedBuilder()
+        .setTitle(`🔔 เวลาแจ้งเตือนที่เลือก`)
+        .setDescription(
+          `**เวลาที่คุณเลือก:**\n${timesList}\n\n` +
+          (timeChangeInfo ? `**การเปลี่ยนแปลง:**\n${timeChangeInfo}\n` : '') +
+          `**ขั้นตอนถัดไป:**\nกดปุ่ม "บันทึกเป็นเวลาเริ่มต้น" หรือ "เฉพาะครั้งนี้" เพื่อเริ่มการแจ้งเตือน`
+        )
+        .setColor('#FFA500')
+        .setFooter({ text: 'การแจ้งเตือนยังไม่เริ่มทำงาน - รอการยืนยัน' });
+      
+      await interaction.followUp({ 
+        embeds: [userConfirmationEmbed],
+        flags: [MessageFlags.Ephemeral] 
+      });
+    }
+    
+    // Handle timezone selection
+    if (interaction.isStringSelectMenu() && interaction.customId === 'timezone_select') {
+      // Check if interaction is already acknowledged
+      if (interaction.replied || interaction.deferred) {
+        console.log('Timezone interaction already acknowledged, skipping...');
+        return;
+      }
+
+      const userId = interaction.user.id;
+      const selectedTimezone = interaction.values[0];
+      
       try {
-        // Send feedback message first so user knows something is happening
-        await interaction.reply({
-          content: '⌛ กำลังเปิดเมนูตั้งค่าเวลาแจ้งเตือน...',
-          flags: [MessageFlags.Ephemeral]
+        // Load current preferences
+        const userPrefs = await loadUserPreferences();
+        
+        // Ensure user exists in preferences
+        if (!userPrefs[userId]) {
+          userPrefs[userId] = initUserPreferences(userId, userPrefs);
+        }
+        
+        // Update timezone setting
+        userPrefs[userId].timezone = selectedTimezone;
+        
+        // Save preferences
+        await saveUserPreferences(userPrefs);
+        
+        // Update notifications with new timezone (use debounced version)
+        await setupNotificationsDebounced();
+        
+        // Get local time in the selected timezone for display
+        const currentTime = dayjs().tz(selectedTimezone).format('HH:mm');
+        
+        // Send confirmation
+        await interaction.update({
+          content: `✅ โซนเวลาของคุณถูกตั้งเป็น **${selectedTimezone}** เรียบร้อยแล้ว\nเวลาปัจจุบันในโซนเวลาของคุณคือ **${currentTime}**`,
+          embeds: [],
+          components: []
         });
         
-        // Send notification selection menu
-        const setupMsg = await sendDailySelector(interaction.channel, interaction.user.id, false);
+        setTimeout(async () => {
+          try {
+            // Try to delete the message after a delay
+            const message = await interaction.channel.messages.fetch(interaction.message.id);
+            if (message && message.deletable) {
+              await message.delete();
+            }
+          } catch (err) {
+            console.error(`Error deleting timezone message: ${err}`);
+          }
+        }, 10000); // Delete after 10 seconds
         
-        if (!setupMsg) {
-          await interaction.editReply({
-            content: '❌ ไม่สามารถตั้งค่าเมนูแจ้งเตือนได้ โปรดลองใหม่อีกครั้ง',
+      } catch (err) {
+        console.error(`Error updating timezone: ${err}`);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({
+            content: '❌ เกิดข้อผิดพลาดในการตั้งค่าโซนเวลา โปรดลองใหม่อีกครั้ง',
+            flags: [MessageFlags.Ephemeral]
+          });
+        }
+      }
+    }
+    
+    // Handle button interactions for auto-apply
+    if (interaction.isButton()) {
+      // Check if interaction is already acknowledged
+      if (interaction.replied || interaction.deferred) {
+        console.log('Button interaction already acknowledged, skipping...');
+        return;
+      }
+
+      if (interaction.customId === 'auto_apply_yes' || interaction.customId === 'auto_apply_no') {
+        const userId = interaction.user.id;
+        const autoApply = interaction.customId === 'auto_apply_yes';
+        
+        // Load current preferences
+        const userPrefs = await loadUserPreferences();
+        
+        // Ensure user exists in preferences
+        if (!userPrefs[userId]) {
+          userPrefs[userId] = initUserPreferences(userId, userPrefs);
+        }
+        
+        // Check if user has temporary times selected
+        if (!userPrefs[userId].tempTimes || userPrefs[userId].tempTimes.length === 0) {
+          await interaction.reply({
+            content: '❌ ไม่พบเวลาที่เลือกไว้ กรุณาเลือกเวลาแจ้งเตือนก่อน',
             flags: [MessageFlags.Ephemeral]
           });
           return;
         }
         
-        // Update the reply with success message
-        await interaction.editReply({
-          content: '✅ เปิดเมนูตั้งค่าแล้ว กรุณาเลือกเวลาที่ต้องการรับการแจ้งเตือน',
-          flags: [MessageFlags.Ephemeral]
+        // Move temporary times to actual times
+        userPrefs[userId].times = userPrefs[userId].tempTimes;
+        userPrefs[userId].autoApply = autoApply;
+        
+        // Clear temporary times
+        delete userPrefs[userId].tempTimes;
+        
+        // Save preferences
+        await saveUserPreferences(userPrefs);
+        
+        // Set up notifications now (use debounced version)
+        await setupNotificationsDebounced();
+        
+        // Get the selected times for confirmation
+        const timesList = userPrefs[userId].times.map(timeValue => {
+          const timeInfo = NOTIFICATION_TIMES.find(t => t.value === timeValue);
+          return `• ${timeInfo ? timeInfo.label : timeValue}`;
+        }).join('\n');
+        
+        const confirmationEmbed = new EmbedBuilder()
+          .setTitle('✅ ตั้งค่าการแจ้งเตือนเสร็จสิ้น')
+          .setDescription(
+            `🎉 **การแจ้งเตือนเริ่มทำงานแล้ว!**\n\n` +
+            `**เวลาที่ตั้งไว้:**\n${timesList}\n\n` +
+            `**การตั้งค่า:**\n` +
+            `• ${autoApply ? '✅ บันทึกเป็นค่าเริ่มต้น - จะใช้ทุกวัน' : '⏱️ เฉพาะครั้งนี้ - จะรีเซ็ตพรุ่งนี้'}\n` +
+            `• 🌐 โซนเวลา: ${userPrefs[userId].timezone || DEFAULT_TIMEZONE}\n\n` +
+            `**คุณจะได้รับ:**\n• ⏰ แจ้งเตือนล่วงหน้า 5 นาที`
+          )
+          .setColor('#00FF00')
+          .setFooter({ text: 'ROMC MVP Notification System' });
+        
+        await interaction.reply({ 
+          embeds: [confirmationEmbed],
+          flags: [MessageFlags.Ephemeral] 
         });
         
-        // Try to delete original message
+        // Delete the setup message after a short delay
+        setTimeout(async () => {
+          try {
+            if (interaction.message && interaction.message.deletable) {
+              await interaction.message.delete();
+            }
+          } catch (err) {
+            console.error(`Error deleting message after selection: ${err}`);
+          }
+        }, 5000); // Delete after 5 seconds
+      } else if (interaction.customId === 'setup_now') {
         try {
-          if (interaction.message && interaction.message.deletable) {
-            await interaction.message.delete();
+          // Send feedback message first so user knows something is happening
+          await interaction.reply({
+            content: '⌛ กำลังเปิดเมนูตั้งค่าเวลาแจ้งเตือน...',
+            flags: [MessageFlags.Ephemeral]
+          });
+          
+          // Send notification selection menu
+          const setupMsg = await sendDailySelector(interaction.channel, interaction.user.id, false);
+          
+          if (!setupMsg) {
+            await interaction.editReply({
+              content: '❌ ไม่สามารถตั้งค่าเมนูแจ้งเตือนได้ โปรดลองใหม่อีกครั้ง',
+              flags: [MessageFlags.Ephemeral]
+            });
+            return;
+          }
+          
+          // Update the reply with success message
+          await interaction.editReply({
+            content: '✅ เปิดเมนูตั้งค่าแล้ว กรุณาเลือกเวลาที่ต้องการรับการแจ้งเตือน',
+            flags: [MessageFlags.Ephemeral]
+          });
+          
+          // Try to delete original message
+          try {
+            if (interaction.message && interaction.message.deletable) {
+              await interaction.message.delete();
+            }
+          } catch (err) {
+            console.error(`Error deleting message after button click: ${err}`);
           }
         } catch (err) {
-          console.error(`Error deleting message after button click: ${err}`);
+          console.error(`Error handling setup_now button: ${err}`);
+          if (!interaction.replied && !interaction.deferred) {
+            await interaction.editReply({
+              content: '❌ เกิดข้อผิดพลาด โปรดลองใหม่อีกครั้ง',
+              flags: [MessageFlags.Ephemeral]
+            });
+          }
         }
-      } catch (err) {
-        console.error(`Error handling setup_now button: ${err}`);
-        await interaction.editReply({
-          content: '❌ เกิดข้อผิดพลาด โปรดลองใหม่อีกครั้ง',
+      }
+    }
+  } catch (err) {
+    console.error('Error handling interaction:', err);
+    // Only try to respond if we haven't already responded
+    if (!interaction.replied && !interaction.deferred) {
+      try {
+        await interaction.reply({
+          content: '❌ เกิดข้อผิดพลาดในการประมวลผลคำสั่ง โปรดลองใหม่อีกครั้ง',
           flags: [MessageFlags.Ephemeral]
         });
+      } catch (replyErr) {
+        console.error('Error sending error reply:', replyErr);
       }
     }
   }
@@ -1054,6 +1091,7 @@ client.on('messageCreate', async message => {
             { name: '`!romc-mvp me`', value: 'ดูเวลาการแจ้งเตือนของคุณ', inline: false },
             { name: '`!romc-mvp timezone`', value: 'ตั้งค่าโซนเวลาของคุณ', inline: false },
             { name: '`!romc-mvp schedule`', value: 'ดูเวลาการเกิด MVP ถัดไป', inline: false },
+            { name: '`!romc-mvp diagnose`', value: '🔍 วินิจฉัยปัญหาการแจ้งเตือน (แนะนำเมื่อมีปัญหา)', inline: false },
             { name: '`!romc-mvp refresh`', value: '🔄 รีเฟรชการแจ้งเตือนของคุณ (แนะนำหลังอัปเดต)', inline: false },
             { name: '`!romc-mvp reload`', value: 'รีโหลดการแจ้งเตือนด้วยการแก้ไขโซนเวลาล่าสุด', inline: false },
             { name: '`!romc-mvp stop`', value: 'ยกเลิกการแจ้งเตือนทั้งหมด', inline: false },
@@ -2010,6 +2048,77 @@ client.on('messageCreate', async message => {
         } catch (err) {
           console.error('Error in debug command:', err);
           await message.reply('❌ เกิดข้อผิดพลาดในการดึงข้อมูล debug');
+        }
+      } else if (command === 'diagnose' || command === 'diagnostic') {
+        // Diagnostic command to help troubleshoot notification issues
+        try {
+          const userId = message.author.id;
+          const userPrefs = await loadUserPreferences();
+          const allUsers = Object.entries(userPrefs);
+          const usersWithNotifications = allUsers.filter(([_, prefs]) => prefs.times && prefs.times.length > 0);
+          const activeJobCount = Object.keys(activeJobs).length;
+          
+          // Check user's specific settings
+          const userSettings = userPrefs[userId];
+          const hasSettings = userSettings && userSettings.times && userSettings.times.length > 0;
+          
+          // Get current time info
+          const currentTime = dayjs().format('HH:mm:ss');
+          const bangkokTime = dayjs().tz(DEFAULT_TIMEZONE).format('HH:mm:ss');
+          
+          const diagnosticEmbed = new EmbedBuilder()
+            .setTitle('🔍 การวินิจฉัยระบบแจ้งเตือน')
+            .setDescription(
+              `**สถานะระบบโดยรวม:**\n` +
+              `• 🤖 บอทออนไลน์: ${client.readyAt ? '✅ ใช่' : '❌ ไม่'}\n` +
+              `• 📊 ผู้ใช้ทั้งหมดในระบบ: ${allUsers.length} คน\n` +
+              `• 🔔 ผู้ใช้ที่มีการแจ้งเตือน: ${usersWithNotifications.length} คน\n` +
+              `• ⚙️ งานที่ใช้งานอยู่: ${activeJobCount} งาน\n` +
+              `• 🕐 เวลาเซิร์ฟเวอร์: ${currentTime}\n` +
+              `• 🌐 เวลากรุงเทพ: ${bangkokTime}\n\n` +
+              
+              `**การตั้งค่าของคุณ:**\n` +
+              (hasSettings ? 
+                `• ✅ มีการตั้งค่าแจ้งเตือน\n` +
+                `• 📅 เวลาที่เลือก: ${userSettings.times.length} เวลา\n` +
+                `• ${userSettings.autoApply ? '✅ บันทึกเป็นค่าเริ่มต้น' : '⏱️ เฉพาะครั้งนี้'}\n` +
+                `• ${userSettings.paused ? '⏸️ หยุดชั่วคราว' : '▶️ กำลังทำงาน'}\n` +
+                `• 🌐 โซนเวลา: ${userSettings.timezone || DEFAULT_TIMEZONE}`
+                :
+                `• ❌ ยังไม่มีการตั้งค่าแจ้งเตือน\n` +
+                `• 📝 ต้องตั้งค่าใหม่หลังจากอัปเดต`
+              ) +
+              `\n\n**การแก้ไขปัญหา:**\n` +
+              (usersWithNotifications.length === 0 ? 
+                `🚨 **ปัญหาหลัก**: ไม่มีผู้ใช้คนใดมีการตั้งค่าแจ้งเตือน\n\n` +
+                `**วิธีแก้ไข:**\n` +
+                `1. ใช้คำสั่ง \`!romc-mvp setup\` เพื่อตั้งค่าใหม่\n` +
+                `2. เลือกเวลาที่ต้องการรับการแจ้งเตือน\n` +
+                `3. เลือก "บันทึกเป็นเวลาเริ่มต้น" เพื่อให้ทำงานทุกวัน\n` +
+                `4. ใช้ \`!romc-mvp test <เวลา>\` เพื่อทดสอบ`
+                :
+                !hasSettings ?
+                `🔧 **คุณต้องตั้งค่าใหม่**\n\n` +
+                `**วิธีแก้ไข:**\n` +
+                `1. ใช้คำสั่ง \`!romc-mvp setup\` เพื่อตั้งค่าใหม่\n` +
+                `2. หรือใช้ \`!romc-mvp refresh\` เพื่อรีเฟรช`
+                :
+                `✅ **การตั้งค่าของคุณดูปกติ**\n\n` +
+                `หากยังไม่ได้รับการแจ้งเตือน:\n` +
+                `1. ใช้ \`!romc-mvp refresh\` เพื่อรีเฟรช\n` +
+                `2. ใช้ \`!romc-mvp test <เวลา>\` เพื่อทดสอบ\n` +
+                `3. ตรวจสอบว่าไม่ได้กด "หยุดชั่วคราว"`
+              )
+            )
+            .setColor(usersWithNotifications.length === 0 ? '#FF0000' : hasSettings ? '#00FF00' : '#FFA500')
+            .setFooter({ text: 'ใช้คำสั่ง !romc-mvp help เพื่อดูคำสั่งทั้งหมด' })
+            .setTimestamp();
+          
+          await message.reply({ embeds: [diagnosticEmbed] });
+          
+        } catch (err) {
+          console.error('Error in diagnostic command:', err);
+          await message.reply('❌ เกิดข้อผิดพลาดในการวินิจฉัยระบบ โปรดลองใหม่อีกครั้ง');
         }
       } else {
         // Unknown command
