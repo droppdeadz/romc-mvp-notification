@@ -43,6 +43,46 @@ const USER_PREFS_FILE = path.join(DB_PATH, 'user_preferences.json');
 // Track active scheduled jobs
 const activeJobs = {};
 
+// Debounce mechanism for setupNotifications
+let setupNotificationsTimeout = null;
+
+// Function to clear all active jobs globally
+function clearAllActiveJobs() {
+  console.log(`🧹 Clearing all active jobs. Current count: ${Object.keys(activeJobs).length}`);
+  
+  Object.entries(activeJobs).forEach(([jobId, job]) => {
+    try {
+      if (job && typeof job.cancel === 'function') {
+        job.cancel();
+        console.log(`   🗑️ Cancelled job: ${jobId}`);
+      } else if (job && typeof job.destroy === 'function') {
+        job.destroy();
+        console.log(`   🗑️ Destroyed job: ${jobId}`);
+      }
+    } catch (err) {
+      console.error(`   ❌ Error cancelling job ${jobId}:`, err);
+    }
+  });
+  
+  // Clear the activeJobs object
+  activeJobs = {};
+  console.log(`✅ All jobs cleared. Active jobs count: ${Object.keys(activeJobs).length}`);
+}
+
+// Debounced version of setupNotifications to prevent rapid successive calls
+async function setupNotificationsDebounced() {
+  // Clear any existing timeout
+  if (setupNotificationsTimeout) {
+    clearTimeout(setupNotificationsTimeout);
+  }
+  
+  // Set a new timeout to call setupNotifications after a short delay
+  setupNotificationsTimeout = setTimeout(async () => {
+    await setupNotifications();
+    setupNotificationsTimeout = null;
+  }, 100); // 100ms delay to prevent rapid successive calls
+}
+
 // Define notification times from the image
 const NOTIFICATION_TIMES = [
   { label: '00:00 น.', value: '00:00', earlyWarningCron: '55 23 * * *' },
@@ -443,6 +483,9 @@ async function sendTimezoneSelector(channel, userId) {
 // Set up notification schedules
 async function setupNotifications() {
   try {
+    // Clear ALL existing jobs first to prevent duplicates
+    clearAllActiveJobs();
+    
     const userPrefs = await loadUserPreferences();
     
     console.log('🔧 Setting up notifications...');
@@ -465,18 +508,7 @@ async function setupNotifications() {
     console.log(`   🌐 User timezone: ${prefs.timezone || DEFAULT_TIMEZONE}`);
     console.log(`   ⏸️ Paused: ${prefs.paused}`);
     
-    // Clear existing schedules if any
-    if (prefs.scheduledJobs) {
-      prefs.scheduledJobs.forEach(jobId => {
-        const job = activeJobs[jobId];
-        if (job && typeof job.cancel === 'function') {
-          job.cancel();
-          delete activeJobs[jobId];
-          console.log(`   🗑️ Cancelled existing job: ${jobId}`);
-        }
-      });
-    }
-    
+    // Clear the user's scheduled jobs array since we cleared all jobs globally
     prefs.scheduledJobs = [];
     
     // Get user's timezone or use default
@@ -628,10 +660,32 @@ async function applyAutoPreferences() {
     // Save if any changes were made
     if (updated) {
       await saveUserPreferences(userPrefs);
-      await setupNotifications();
+      await setupNotificationsDebounced();
     }
   } catch (err) {
     console.error('Error applying auto preferences:', err);
+  }
+}
+
+// Function to restart all cron jobs (useful after updates)
+async function restartAllCronJobs() {
+  try {
+    console.log('🔄 Restarting all cron jobs...');
+    
+    // Clear all existing jobs first
+    clearAllActiveJobs();
+    
+    // Wait a moment to ensure cleanup is complete
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    // Reload user preferences and setup notifications fresh
+    await setupNotifications();
+    
+    console.log('✅ All cron jobs restarted successfully');
+    return true;
+  } catch (err) {
+    console.error('❌ Error restarting cron jobs:', err);
+    return false;
   }
 }
 
@@ -647,6 +701,38 @@ client.once('ready', async () => {
   
   // Schedule daily message
   scheduleDailyMessage();
+  
+  // Send update notification to the notification channel (if not disabled)
+  if (!isChannelDisabled) {
+    setTimeout(async () => {
+      try {
+        const channel = await client.channels.fetch(process.env.NOTIFICATION_CHANNEL_ID);
+        if (channel) {
+          const updateEmbed = new EmbedBuilder()
+            .setTitle('🔄 ROMC MVP Bot อัปเดตแล้ว!')
+            .setDescription(
+              `✅ **การแก้ไขปัญหาการแจ้งเตือนซ้ำเสร็จสิ้น!**\n\n` +
+              `**สิ่งที่ได้รับการแก้ไข:**\n` +
+              `• 🔧 แก้ไขปัญหาการแจ้งเตือนซ้ำ\n` +
+              `• ⚡ ปรับปรุงระบบการจัดการงาน cron\n` +
+              `• 🛡️ เพิ่มระบบป้องกัน race conditions\n` +
+              `• 🔄 เพิ่มคำสั่งรีเฟรชใหม่\n\n` +
+              `**คำสั่งใหม่:**\n` +
+              `• \`!romc-mvp refresh\` - รีเฟรชการแจ้งเตือนของคุณ\n` +
+              `• \`!romc-mvp admin restart\` - รีสตาร์ทระบบทั้งหมด (Admin)\n\n` +
+              `**แนะนำ:** หากคุณเคยมีปัญหาการแจ้งเตือนซ้ำ กรุณาใช้คำสั่ง \`!romc-mvp refresh\` เพื่อรีเฟรชการตั้งค่าของคุณ`
+            )
+            .setColor('#00FF00')
+            .setFooter({ text: 'ROMC MVP Notification System - Update v2.1' })
+            .setTimestamp();
+          
+          await channel.send({ embeds: [updateEmbed] });
+        }
+      } catch (err) {
+        console.error('Error sending update notification:', err);
+      }
+    }, 5000); // Wait 5 seconds after bot starts
+  }
 });
 
 // Interaction handling for select menu and buttons
@@ -798,8 +884,8 @@ client.on('interactionCreate', async interaction => {
       // Save preferences
       await saveUserPreferences(userPrefs);
       
-      // Update notifications with new timezone
-      await setupNotifications();
+      // Update notifications with new timezone (use debounced version)
+      await setupNotificationsDebounced();
       
       // Get local time in the selected timezone for display
       const currentTime = dayjs().tz(selectedTimezone).format('HH:mm');
@@ -865,8 +951,8 @@ client.on('interactionCreate', async interaction => {
       // Save preferences
       await saveUserPreferences(userPrefs);
       
-      // Set up notifications now
-      await setupNotifications();
+      // Set up notifications now (use debounced version)
+      await setupNotificationsDebounced();
       
       // Get the selected times for confirmation
       const timesList = userPrefs[userId].times.map(timeValue => {
@@ -968,6 +1054,7 @@ client.on('messageCreate', async message => {
             { name: '`!romc-mvp me`', value: 'ดูเวลาการแจ้งเตือนของคุณ', inline: false },
             { name: '`!romc-mvp timezone`', value: 'ตั้งค่าโซนเวลาของคุณ', inline: false },
             { name: '`!romc-mvp schedule`', value: 'ดูเวลาการเกิด MVP ถัดไป', inline: false },
+            { name: '`!romc-mvp refresh`', value: '🔄 รีเฟรชการแจ้งเตือนของคุณ (แนะนำหลังอัปเดต)', inline: false },
             { name: '`!romc-mvp reload`', value: 'รีโหลดการแจ้งเตือนด้วยการแก้ไขโซนเวลาล่าสุด', inline: false },
             { name: '`!romc-mvp stop`', value: 'ยกเลิกการแจ้งเตือนทั้งหมด', inline: false },
             { name: '`!romc-mvp pause`', value: 'หยุดการแจ้งเตือนชั่วคราว', inline: false },
@@ -976,7 +1063,8 @@ client.on('messageCreate', async message => {
             ...(message.member?.permissions?.has('Administrator') ? [
               { name: '`!romc-mvp admin list`', value: '🔒 ดูการแจ้งเตือนทั้งหมดในระบบ (Admin)', inline: false },
               { name: '`!romc-mvp admin remove @user`', value: '🔒 ลบการแจ้งเตือนของผู้ใช้ (Admin)', inline: false },
-              { name: '`!romc-mvp admin clear`', value: '🔒 ลบการแจ้งเตือนทั้งหมดในระบบ (Admin)', inline: false }
+              { name: '`!romc-mvp admin clear`', value: '🔒 ลบการแจ้งเตือนทั้งหมดในระบบ (Admin)', inline: false },
+              { name: '`!romc-mvp admin restart`', value: '🔒 รีสตาร์ทระบบแจ้งเตือนทั้งหมด (Admin)', inline: false }
             ] : []),
             ...(isTestMode ? [{ name: '`!romc-mvp test [เวลา]`', value: 'ทดสอบการแจ้งเตือน (สำหรับโหมดทดสอบเท่านั้น)', inline: false }] : [])
           )
@@ -1350,6 +1438,62 @@ client.on('messageCreate', async message => {
         } catch (err) {
           console.error('Error reloading notifications:', err);
           await message.reply('❌ เกิดข้อผิดพลาดในการรีโหลดการแจ้งเตือน โปรดลองใหม่อีกครั้ง');
+        }
+        
+      } else if (command === 'refresh') {
+        // Refresh user's notification settings (recommended after updates)
+        try {
+          const userId = message.author.id;
+          const userPrefs = await loadUserPreferences();
+          
+          // Check if user has any notification settings
+          if (!userPrefs[userId] || !userPrefs[userId].times || userPrefs[userId].times.length === 0) {
+            const noSettingsEmbed = new EmbedBuilder()
+              .setTitle('🔄 รีเฟรชการแจ้งเตือน')
+              .setDescription('❌ คุณยังไม่มีการตั้งค่าแจ้งเตือน\n\nกรุณาใช้คำสั่ง `!romc-mvp setup` เพื่อตั้งค่าการแจ้งเตือนของคุณก่อน')
+              .setColor('#FFA500')
+              .setFooter({ text: 'ROMC MVP Notification System' });
+            
+            await message.reply({ embeds: [noSettingsEmbed] });
+            return;
+          }
+          
+          const loadingMsg = await message.reply('⌛ กำลังรีเฟรชการแจ้งเตือนของคุณ...');
+          
+          // Force refresh the user's notifications using the debounced version
+          await setupNotificationsDebounced();
+          
+          // Get user's current settings for display
+          const timesList = userPrefs[userId].times.map(timeValue => {
+            const timeInfo = NOTIFICATION_TIMES.find(t => t.value === timeValue);
+            return `• ${timeInfo ? timeInfo.label : timeValue}`;
+          }).join('\n');
+          
+          const userTimezone = userPrefs[userId].timezone || DEFAULT_TIMEZONE;
+          const currentTime = dayjs().tz(userTimezone).format('HH:mm');
+          
+          const refreshEmbed = new EmbedBuilder()
+            .setTitle('🔄 รีเฟรชการแจ้งเตือนเสร็จสิ้น')
+            .setDescription(
+              `✅ **การแจ้งเตือนของคุณได้รับการรีเฟรชแล้ว!**\n\n` +
+              `**เวลาที่ตั้งไว้:**\n${timesList}\n\n` +
+              `**การตั้งค่าปัจจุบัน:**\n` +
+              `• ${userPrefs[userId].autoApply ? '✅ บันทึกเป็นค่าเริ่มต้น' : '⏱️ เฉพาะครั้งนี้'}\n` +
+              `• ${userPrefs[userId].paused ? '⏸️ หยุดชั่วคราว' : '▶️ กำลังทำงาน'}\n` +
+              `• 🌐 โซนเวลา: ${userTimezone} (${currentTime})\n\n` +
+              `**ประโยชน์ของการรีเฟรช:**\n` +
+              `• แก้ไขปัญหาการแจ้งเตือนซ้ำ\n` +
+              `• อัปเดตการตั้งค่าโซนเวลา\n` +
+              `• รีเซ็ตระบบแจ้งเตือนให้ทำงานถูกต้อง`
+            )
+            .setColor('#00FF00')
+            .setFooter({ text: 'แนะนำให้ใช้คำสั่งนี้หลังจากมีการอัปเดตบอท' });
+          
+          await loadingMsg.edit({ content: '', embeds: [refreshEmbed] });
+          
+        } catch (err) {
+          console.error('Error refreshing user notifications:', err);
+          await message.reply('❌ เกิดข้อผิดพลาดในการรีเฟรชการแจ้งเตือน โปรดลองใหม่อีกครั้ง');
         }
         
       } else if (command === 'stop') {
@@ -1755,8 +1899,56 @@ client.on('messageCreate', async message => {
             await message.reply('❌ เกิดข้อผิดพลาดในการลบการแจ้งเตือนทั้งหมด');
           }
           
+        } else if (subCommand === 'restart') {
+          // Restart all cron jobs in the system (admin only)
+          try {
+            const loadingMsg = await message.reply('⌛ กำลังรีสตาร์ทระบบแจ้งเตือนทั้งหมด...');
+            
+            // Use the restart function
+            const success = await restartAllCronJobs();
+            
+            if (success) {
+              // Get current system status for display
+              const userPrefs = await loadUserPreferences();
+              const usersWithNotifications = Object.entries(userPrefs).filter(([userId, prefs]) => 
+                prefs.times && prefs.times.length > 0
+              );
+              
+              const restartEmbed = new EmbedBuilder()
+                .setTitle('🔒 รีสตาร์ทระบบแจ้งเตือนเสร็จสิ้น (Admin)')
+                .setDescription(
+                  `✅ **ระบบแจ้งเตือนได้รับการรีสตาร์ทเรียบร้อยแล้ว!**\n\n` +
+                  `**สถานะระบบ:**\n` +
+                  `• ผู้ใช้ที่มีการแจ้งเตือน: ${usersWithNotifications.length} คน\n` +
+                  `• งานที่ใช้งานอยู่: ${Object.keys(activeJobs).length} งาน\n` +
+                  `• เวลาเซิร์ฟเวอร์: ${dayjs().format('HH:mm:ss')}\n\n` +
+                  `**ประโยชน์ของการรีสตาร์ท:**\n` +
+                  `• แก้ไขปัญหาการแจ้งเตือนซ้ำ\n` +
+                  `• รีเซ็ตงาน cron ทั้งหมด\n` +
+                  `• อัปเดตการตั้งค่าล่าสุด\n` +
+                  `**คำแนะนำ:** แจ้งให้ผู้ใช้ใช้คำสั่ง \`!romc-mvp refresh\` หากยังมีปัญหา`
+                )
+                .setColor('#00FF00')
+                .setFooter({ text: 'ROMC MVP Notification System - Admin' });
+              
+              await loadingMsg.edit({ content: '', embeds: [restartEmbed] });
+            } else {
+              const errorEmbed = new EmbedBuilder()
+                .setTitle('❌ รีสตาร์ทระบบล้มเหลว (Admin)')
+                .setDescription('เกิดข้อผิดพลาดในการรีสตาร์ทระบบแจ้งเตือน กรุณาตรวจสอบ console logs')
+                .setColor('#FF0000')
+                .setFooter({ text: 'ROMC MVP Notification System - Admin' });
+              
+              await loadingMsg.edit({ content: '', embeds: [errorEmbed] });
+            }
+            
+          } catch (err) {
+            console.error('Error restarting all cron jobs:', err);
+            await message.reply('❌ เกิดข้อผิดพลาดในการรีสตาร์ทระบบแจ้งเตือน');
+          }
+          
         } else {
-          await message.reply('❌ คำสั่ง admin ไม่ถูกต้อง\nใช้: `!romc-mvp admin list`, `!romc-mvp admin remove @user`, หรือ `!romc-mvp admin clear`');
+          await message.reply('❌ คำสั่ง admin ไม่ถูกต้อง\nใช้: `!romc-mvp admin list`, `!romc-mvp admin remove @user`, `!romc-mvp admin clear`, หรือ `!romc-mvp admin restart`');
         }
         
       } else if (command === 'debug') {
